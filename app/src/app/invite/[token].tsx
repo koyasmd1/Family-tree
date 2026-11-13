@@ -3,6 +3,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import { api, type TreePerson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Body, Button, Card, ErrorText, Field, Kicker, Loading, Screen, Title } from "@/components/ui";
+import { OneEarth } from "@/components/moments";
+import { View } from "react-native";
 
 export default function AcceptInvite() {
   const { token } = useLocalSearchParams<{ token: string }>();
@@ -25,7 +27,7 @@ export default function AcceptInvite() {
     try {
       const r = await api(null).acceptInvite(token!, login, password);
       await signIn(r.token);
-      router.replace("/inbox");
+      router.replace({ pathname: "/inbox", params: { joined: "1" } });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -45,6 +47,9 @@ export default function AcceptInvite() {
 
   return (
     <Screen>
+      <View style={{ alignItems: "center" }}>
+        <OneEarth size={200} />
+      </View>
       <Kicker>YOU'RE INVITED</Kicker>
       <Title>Welcome, {info.person.full_name}</Title>
       <Body>
