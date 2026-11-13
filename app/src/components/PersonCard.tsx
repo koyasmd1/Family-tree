@@ -1,8 +1,9 @@
-import { Animated, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Platform, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import type { TreePerson } from "@/lib/api";
 import { years } from "@/lib/family";
 import { colors, fonts } from "@/lib/theme";
 import { useLoop } from "./animations";
+import { Ripple } from "./moments";
 
 interface Props {
   person: TreePerson;
@@ -10,6 +11,7 @@ interface Props {
   isMe: boolean;
   pending: boolean;
   onPress: () => void;
+  onLayout?: (e: LayoutChangeEvent) => void;
 }
 
 /**
@@ -17,8 +19,9 @@ interface Props {
  * - you glow gold (animation "Glow")
  * - relatives who passed away glow softly like a lantern with a moon (animation 03)
  * - a link awaiting approval breathes with an amber dashed edge (animation 07)
+ * - rings spread out from your own card when the tree opens (animation 05)
  */
-export function PersonCard({ person, label, isMe, pending, onPress }: Props) {
+export function PersonCard({ person, label, isMe, pending, onPress, onLayout }: Props) {
   const passed = person.is_living === 0;
   const glow = useLoop(isMe ? 3200 : passed ? 4500 : 2600);
   const animated = isMe || passed || pending;
@@ -31,7 +34,8 @@ export function PersonCard({ person, label, isMe, pending, onPress }: Props) {
     .join(", ");
 
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={a11y} style={{ margin: 6 }}>
+    <Pressable onPress={onPress} onLayout={onLayout} accessibilityRole="button" accessibilityLabel={a11y} style={{ margin: 6 }}>
+      {isMe && <Ripple />}
       <Animated.View style={{ transform: [{ scale }] }}>
         {animated && (
           <Animated.View

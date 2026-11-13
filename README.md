@@ -44,6 +44,9 @@ npm start              # or scan the QR code with the Expo Go app on your phone
 
 Tests for every rule: `cd api && npm test`.
 
+To see all 25 animations together, open `/animations` in the app (for example http://localhost:8081/animations).
+If a phone or computer is set to reduce motion, every animation shows a still picture instead.
+
 ## Going live
 
 ### Server (free)

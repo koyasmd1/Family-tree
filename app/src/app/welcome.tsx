@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Body, Button, Card, ErrorText, Field, Kicker, Screen, Title } from "@/components/ui";
 import { SeedToTree } from "@/components/animations";
+import { NorthernGlow } from "@/components/moments";
 
 export default function Welcome() {
   const { signIn } = useAuth();
@@ -32,8 +33,10 @@ export default function Welcome() {
       <View style={{ alignItems: "center", marginTop: 24 }}>
         <SeedToTree />
       </View>
-      <Kicker>ONE FAMILY</Kicker>
-      <Title>Everyone on earth, one family tree.</Title>
+      <NorthernGlow style={{ gap: 8, paddingVertical: 12 }}>
+        <Kicker>ONE FAMILY</Kicker>
+        <Title>Everyone on earth, one family tree.</Title>
+      </NorthernGlow>
       <Body muted>
         Joining is by invitation. A relative who is already in the tree adds you and sends you a link. Already a
         member? Sign in below.

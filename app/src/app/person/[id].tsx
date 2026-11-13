@@ -4,9 +4,11 @@ import * as Clipboard from "expo-clipboard";
 import { Stack, router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { api, inviteLink, type Relation, type RelativeKind, type Tree, type TreePerson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { years } from "@/lib/family";
+import { relationPath, years, type PathStep } from "@/lib/family";
 import { colors, fonts } from "@/lib/theme";
-import { Body, Button, Card, Choice, ErrorText, Field, Kicker, Loading, Screen, Title } from "@/components/ui";
+import { Body, Button, Card, Choice, ErrorText, Field, Kicker, Loading, Screen } from "@/components/ui";
+import { Celebration, type Moment } from "@/components/Celebration";
+import { FallingPetals, GoldenPath, InkTitle } from "@/components/moments";
 
 const KINDS: { value: RelativeKind; label: string }[] = [
   { value: "parent", label: "Parent" },
@@ -37,11 +39,24 @@ export default function PersonScreen() {
   const [notice, setNotice] = useState("");
   const [mode, setMode] = useState<"view" | "edit" | "add">("view");
   const [link, setLink] = useState("");
+  const [path, setPath] = useState<PathStep[] | null>(null);
+  const [moment, setMoment] = useState<Moment | null>(null);
+  const closeMoment = useCallback(() => setMoment(null), []);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
     try {
-      setTree(await api(token).tree(id, 1));
+      const t = await api(token).tree(id, 1);
+      setTree(t);
+      if (t.me !== id) {
+        // 11 "Golden Path": how you are related to this person.
+        api(token)
+          .tree(undefined, 6)
+          .then((mine) => setPath(relationPath(mine, mine.me, id)))
+          .catch(() => setPath(null));
+      } else {
+        setPath(null);
+      }
     } catch (e) {
       setError((e as Error).message);
     }
@@ -121,8 +136,9 @@ export default function PersonScreen() {
   return (
     <Screen>
       <Stack.Screen options={{ title: person.full_name }} />
+      {person.is_living === 0 && <FallingPetals />}
       <Kicker>{isMe ? "YOU" : person.is_living === 0 ? "IN LOVING MEMORY" : person.has_account ? "MEMBER" : "NOT JOINED YET"}</Kicker>
-      <Title>{person.full_name}</Title>
+      <InkTitle key={person.id} text={person.full_name} />
       {!!years(person) && <Body muted>{years(person)}</Body>}
       {(person.birthplace || person.country) && <Body muted>{[person.birthplace, person.country].filter(Boolean).join(", ")}</Body>}
       {!!person.story && <Body>{person.story}</Body>}
@@ -145,6 +161,9 @@ export default function PersonScreen() {
           onSave={async (input) => {
             await api(token).updatePerson(person.id, input);
             setMode("view");
+            if (person.is_living === 1 && input.is_living === false) {
+              setMoment({ kind: "lantern", title: `In loving memory of ${input.full_name as string}`, body: "Their light stays in the family tree." });
+            }
             await load();
           }}
         />
@@ -156,9 +175,10 @@ export default function PersonScreen() {
           spouses={spouses}
           token={token}
           onCancel={() => setMode("view")}
-          onDone={async (msg) => {
+          onDone={async (msg, added) => {
             setMode("view");
             setNotice(msg);
+            setMoment(momentForAdded(added, person.full_name));
             await load();
           }}
         />
@@ -176,6 +196,13 @@ export default function PersonScreen() {
           ) : (
             <Button title="Create invite link" onPress={makeInvite} />
           )}
+        </Card>
+      )}
+
+      {path && path.length > 1 && (
+        <Card>
+          <Text style={styles.cardTitle}>How you're related</Text>
+          <GoldenPath steps={path} />
         </Card>
       )}
 
@@ -214,8 +241,23 @@ export default function PersonScreen() {
           );
         })}
       </Card>
+      <Celebration moment={moment} onDone={closeMoment} />
     </Screen>
   );
+}
+
+interface Added {
+  kind: RelativeKind;
+  name: string;
+  living: boolean;
+}
+
+/** The animation that marks a new relative: 09 Birth Bloom, 17 Endless Bond or 23 Lantern Release. */
+function momentForAdded(added: Added, of: string): Moment | null {
+  if (!added.living) return { kind: "lantern", title: `${added.name} is remembered`, body: "Their light is part of the family tree now." };
+  if (added.kind === "child") return { kind: "bloom", title: `Welcome, ${added.name}`, body: `Added as a child of ${of}.` };
+  if (added.kind === "parent") return { kind: "endless", title: `${added.name} is linked`, body: `Added as a parent of ${of}. A bond between parent and child never breaks.` };
+  return null;
 }
 
 function EditPerson({ person, onCancel, onSave }: { person: TreePerson; onCancel: () => void; onSave: (input: Record<string, unknown>) => Promise<void> }) {
@@ -282,7 +324,7 @@ function AddRelative({
   spouses: TreePerson[];
   token: string | null;
   onCancel: () => void;
-  onDone: (message: string) => Promise<void>;
+  onDone: (message: string, added: Added) => Promise<void>;
 }) {
   const [kind, setKind] = useState<RelativeKind>("parent");
   const [source, setSource] = useState<"new" | "existing">("new");
@@ -315,7 +357,7 @@ function AddRelative({
     setBusy(true);
     setError("");
     try {
-      await api(token).addRelative({
+      const result = await api(token).addRelative({
         kind,
         of: person.id,
         ...(source === "existing" && picked
@@ -331,11 +373,12 @@ function AddRelative({
             }),
         ...(kind === "child" && otherParent !== "none" ? { otherParentId: otherParent } : {}),
       });
-      await onDone(
-        needsApproval && living === "yes"
-          ? "Added. This link shows as awaiting approval until they confirm it."
-          : "Added to the tree.",
-      );
+      const waiting = result.relations.some((r) => r.status === "pending");
+      await onDone(waiting ? "Added. This link shows as awaiting approval until they confirm it." : "Added to the tree.", {
+        kind,
+        name: result.person.full_name,
+        living: result.person.is_living === 1,
+      });
     } catch (e) {
       setError((e as Error).message);
     } finally {

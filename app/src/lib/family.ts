@@ -140,3 +140,51 @@ export function years(p: TreePerson): string {
   }
   return p.birth_year ? `Born ${p.birth_year}` : "";
 }
+
+export interface PathStep {
+  id: string;
+  name: string;
+  relation: string;
+}
+
+/**
+ * The shortest chain of confirmed links from one person to another, for
+ * 11 "Golden Path". Each step says how that person is related to the one before.
+ * Returns null when they are not connected within the tree that was loaded.
+ */
+export function relationPath(tree: Tree, fromId: string, toId: string): PathStep[] | null {
+  const byId = new Map(tree.people.map((p) => [p.id, p]));
+  if (!byId.has(fromId) || !byId.has(toId)) return null;
+  const active = tree.relations.filter((r) => r.status === "active");
+  const prev = new Map<string, { id: string; r: Relation } | null>([[fromId, null]]);
+  const queue = [fromId];
+  while (queue.length && !prev.has(toId)) {
+    const id = queue.shift()!;
+    for (const r of active) {
+      const other = r.a_id === id ? r.b_id : r.b_id === id ? r.a_id : null;
+      if (other && !prev.has(other) && byId.has(other)) {
+        prev.set(other, { id, r });
+        queue.push(other);
+      }
+    }
+  }
+  if (!prev.has(toId)) return null;
+  const chain: string[] = [];
+  for (let at: string | undefined = toId; at; at = prev.get(at)?.id) chain.unshift(at);
+  return chain.map((id, i) => {
+    const p = byId.get(id)!;
+    if (i === 0) return { id, name: id === tree.me ? "You" : p.full_name, relation: "Start" };
+    const before = byId.get(chain[i - 1])!;
+    const owner = chain[i - 1] === tree.me ? "Your" : `${before.full_name}'s`;
+    const link = prev.get(id)!.r;
+    let word: string;
+    if (link.type === "parent") {
+      word = link.a_id === id ? pick(p.gender, "father", "mother", "parent") : pick(p.gender, "son", "daughter", "child");
+    } else if (link.type === "sibling") {
+      word = pick(p.gender, "brother", "sister", "brother or sister");
+    } else {
+      word = link.divorced ? pick(p.gender, "former husband", "former wife", "former spouse") : pick(p.gender, "husband", "wife", "husband or wife");
+    }
+    return { id, name: p.full_name, relation: `${owner} ${word}` };
+  });
+}

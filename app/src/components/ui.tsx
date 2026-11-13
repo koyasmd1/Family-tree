@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, fonts } from "@/lib/theme";
+import { SiblingOrbit } from "./moments";
 
 export function Screen({ children, scroll = true }: { children: ReactNode; scroll?: boolean }) {
   return (
@@ -122,10 +123,11 @@ export function Card({ children }: { children: ReactNode }) {
   return <View style={styles.card}>{children}</View>;
 }
 
+/** Loading, with 14 "Sibling Orbit": brothers and sisters circling their parents. */
 export function Loading() {
   return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.night }}>
-      <ActivityIndicator color={colors.gold} size="large" />
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.night }} accessibilityLabel="Loading" accessibilityRole="progressbar">
+      <SiblingOrbit size={120} />
     </View>
   );
 }
