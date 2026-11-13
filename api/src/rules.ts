@@ -558,7 +558,12 @@ export async function getTree(ctx: Ctx, actorId: string, rootId: string, depth =
   await getPerson(ctx, rootId);
   const fromRoot = await distancesFrom(ctx, [rootId], d);
   const closeToMe = await distancesFrom(ctx, [actorId], CLOSE_DISTANCE);
-  if (!fromRoot.has(actorId) && !(await distancesFrom(ctx, [actorId], MAX_TREE_DEPTH * 2)).has(rootId)) {
+  if (
+    !fromRoot.has(actorId) &&
+    !(await canManage(ctx, actorId, rootId)) &&
+    !(await existingLink(ctx, actorId, rootId)) &&
+    !(await distancesFrom(ctx, [actorId], MAX_TREE_DEPTH * 2)).has(rootId)
+  ) {
     throw new HttpError(403, "forbidden", "You can only view people connected to you.");
   }
 
@@ -567,8 +572,10 @@ export async function getTree(ctx: Ctx, actorId: string, rootId: string, depth =
   for (const id of ids) {
     const p = await getPerson(ctx, id);
     const member = await hasAccount(ctx, id);
-    // Privacy: details of living people are shown only to close relatives.
-    const showDetails = p.is_living === 0 || closeToMe.has(id);
+    const canEdit = await canManage(ctx, actorId, id);
+    // Privacy: details of living people are shown only to close relatives
+    // (and to whoever looks after a profile that has no account).
+    const showDetails = p.is_living === 0 || closeToMe.has(id) || canEdit;
     people.push({
       id: p.id,
       full_name: p.full_name,
@@ -584,7 +591,7 @@ export async function getTree(ctx: Ctx, actorId: string, rootId: string, depth =
             story: p.story,
           }
         : {}),
-      can_edit: await canManage(ctx, actorId, id),
+      can_edit: canEdit,
     });
   }
 
@@ -603,11 +610,21 @@ export async function getTree(ctx: Ctx, actorId: string, rootId: string, depth =
   // Pending links to people outside the window (e.g. a sibling just added) for the viewer.
   for (const r of await relationsOf(ctx, actorId, ["pending"])) {
     if (seen.has(r.id)) continue;
-    const other = r.a_id === actorId ? r.b_id : r.a_id;
-    if (!idSet.has(other)) {
-      const p = await getPerson(ctx, other);
-      people.push({ id: p.id, full_name: p.full_name, is_living: p.is_living, has_account: await hasAccount(ctx, other), can_edit: await canManage(ctx, actorId, other) });
-      idSet.add(other);
+    // Only show it next to the person being viewed (or when viewing yourself).
+    if (rootId !== actorId && r.a_id !== rootId && r.b_id !== rootId) continue;
+    for (const end of [r.a_id, r.b_id]) {
+      if (idSet.has(end)) continue;
+      const p = await getPerson(ctx, end);
+      const close = end === actorId || closeToMe.has(end);
+      people.push({
+        id: p.id,
+        full_name: p.full_name,
+        is_living: p.is_living,
+        has_account: await hasAccount(ctx, end),
+        ...(close ? { gender: p.gender, birth_year: p.birth_year, death_year: p.death_year, birthplace: p.birthplace, country: p.country, story: p.story } : {}),
+        can_edit: await canManage(ctx, actorId, end),
+      });
+      idSet.add(end);
     }
     seen.add(r.id);
     relations.push(r);

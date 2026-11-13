@@ -133,6 +133,15 @@ describe("rule: siblings and spouses need approval", () => {
     expect(ok.json.status).toBe("active");
   });
 
+  it("lets you open the page of a relative whose link is still pending", async () => {
+    const a = await starter();
+    const sis = await add(a.token, a.id, "sibling", { full_name: "Sara" });
+    const r = await call("GET", `/tree?root=${sis.person.id}&depth=1`, { token: a.token });
+    expect(r.status).toBe(200);
+    expect(r.json.people.map((p: any) => p.id).sort()).toEqual([a.id, sis.person.id].sort());
+    expect(r.json.relations[0].status).toBe("pending");
+  });
+
   it("lets a spouse reject a wrong request", async () => {
     const a = await starter();
     const w = await add(a.token, a.id, "spouse", { full_name: "Noor" });
