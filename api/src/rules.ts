@@ -1,7 +1,9 @@
 // The family tree rules agreed with the project owner:
 //
-// 1. One single global tree. Nobody can sign up directly: a member adds a
-//    relative and shares an invite link; the relative joins through it.
+// 1. One single global tree. A member can add a relative and share an invite
+//    link. Anyone can also sign up directly (changed 2026-11-14), but a
+//    newcomer only becomes part of the tree once nearby relatives confirm
+//    them: either "this profile is me" or "this person is my relative".
 // 2. Parents and children are linked straight away, without approval.
 // 3. Siblings and spouses must be approved by the other person. Sibling links
 //    that appear because a new child joins parents who already have children
@@ -10,6 +12,7 @@
 //    (closest relatives first, then further out). 3 must agree. The two people
 //    in the link can never vote. A voter who has not answered in 7 days is
 //    replaced by another random relative. A vote removes only that one link.
+//    Anyone in the tree who sees a wrong link can raise the objection.
 
 import { HttpError, hashPassword, newId, normalizeLogin, randomToken, shuffle, timingSafeEqual } from "./util";
 
@@ -35,6 +38,7 @@ export interface Person {
   story: string | null;
   created_by: string | null;
   created_at: string;
+  in_tree: number;
 }
 
 export interface Relation {
@@ -111,13 +115,15 @@ function validatePerson(input: PersonInput) {
   };
 }
 
-async function insertPerson(ctx: Ctx, input: PersonInput, createdBy: string | null): Promise<Person> {
+async function insertPerson(ctx: Ctx, input: PersonInput, createdBy: string | null, inTree?: boolean): Promise<Person> {
   const p = validatePerson(input);
-  const person: Person = { id: newId(), ...p, created_by: createdBy, created_at: iso(ctx) };
+  // Someone added by a newcomer waits outside the tree together with them.
+  const in_tree = inTree !== undefined ? (inTree ? 1 : 0) : createdBy ? (await getPerson(ctx, createdBy)).in_tree : 1;
+  const person: Person = { id: newId(), ...p, created_by: createdBy, created_at: iso(ctx), in_tree };
   await ctx.db
     .prepare(
-      `INSERT INTO people (id, full_name, gender, birth_year, is_living, death_year, birthplace, country, story, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO people (id, full_name, gender, birth_year, is_living, death_year, birthplace, country, story, created_by, created_at, in_tree)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       person.id,
@@ -131,6 +137,7 @@ async function insertPerson(ctx: Ctx, input: PersonInput, createdBy: string | nu
       person.story,
       person.created_by,
       person.created_at,
+      person.in_tree,
     )
     .run();
   return person;
@@ -420,9 +427,18 @@ export async function addRelative(ctx: Ctx, actorId: string, input: AddRelativeI
   let relativeId: string;
   if (input.existingPersonId) {
     if (input.existingPersonId === of) throw new HttpError(400, "bad_input", "A person cannot be their own relative.");
-    relativeId = (await getPerson(ctx, input.existingPersonId)).id;
+    const existing = await getPerson(ctx, input.existingPersonId);
+    relativeId = existing.id;
     if (await existingLink(ctx, of, relativeId)) {
       throw new HttpError(409, "already_linked", "These two people are already linked.");
+    }
+    const from = await getPerson(ctx, of);
+    if (from.in_tree === 0 && existing.in_tree === 1) {
+      // A newcomer connecting to the tree: nearby relatives must confirm it.
+      return requestLink(ctx, actorId, from, existing, kind);
+    }
+    if (from.in_tree === 1 && existing.in_tree === 0) {
+      throw new HttpError(403, "not_confirmed", "This person has not been confirmed yet. They connect themselves to the tree first.");
     }
   } else {
     if (!input.person) throw new HttpError(400, "bad_input", "Give the new relative's details.");
@@ -635,6 +651,7 @@ export async function getTree(ctx: Ctx, actorId: string, rootId: string, depth =
 export async function searchPeople(ctx: Ctx, actorId: string, query: string) {
   const q = (query ?? "").trim();
   if (q.length < 2) return [];
+  if ((await getPerson(ctx, actorId)).in_tree === 0) return findInTree(ctx, q);
   // Only people connected to the searcher, so strangers can't be browsed.
   const reach = await distancesFrom(ctx, [actorId], MAX_TREE_DEPTH);
   const { results } = await ctx.db
@@ -694,13 +711,12 @@ async function insertBallot(ctx: Ctx, voteId: string, voterId: string) {
 export async function startRemovalVote(ctx: Ctx, actorId: string, relationId: string) {
   const rel = await ctx.db.prepare(`SELECT * FROM relations WHERE id = ?`).bind(relationId).first<Relation>();
   if (!rel || rel.status !== "active") throw new HttpError(404, "not_found", "Active relation not found.");
-  const allowed =
-    rel.a_id === actorId ||
-    rel.b_id === actorId ||
-    rel.created_by === actorId ||
-    (await canManage(ctx, actorId, rel.a_id)) ||
-    (await canManage(ctx, actorId, rel.b_id));
-  if (!allowed) throw new HttpError(403, "forbidden", "Only someone in this link can ask to remove it.");
+  // Anyone in the tree who sees a wrong link can object; the vote decides.
+  const actor = await getPerson(ctx, actorId);
+  const reach = actor.in_tree === 1 ? await distancesFrom(ctx, [actorId], MAX_TREE_DEPTH * 2) : new Map();
+  if (!reach.has(rel.a_id) && !reach.has(rel.b_id)) {
+    throw new HttpError(403, "forbidden", "Only members connected to this family can object to a link.");
+  }
   const open = await ctx.db
     .prepare(`SELECT id FROM removal_votes WHERE relation_id = ? AND status = 'open'`)
     .bind(relationId)
@@ -829,4 +845,330 @@ export async function votesForMe(ctx: Ctx, actorId: string) {
     }
   }
   return out;
+}
+
+// ---------- open sign-up: newcomers confirmed by nearby relatives ----------
+
+export const CLOSE_FAMILY = 2; // parents, children, siblings, spouse, grandparents, grandchildren...
+export const FAR_CHECKERS = 4; // when no close relative has joined, ask this many further out
+export const FAR_YES_NEEDED = 2; // ...and this many must say yes
+const MAX_CLOSE_CHECKERS = 6;
+const MAX_OPEN_REQUESTS = 3;
+const MAX_REQUESTS_PER_DAY = 5;
+
+interface JoinRequest {
+  id: string;
+  kind: "claim" | "link";
+  requester_id: string;
+  target_id: string;
+  relation_id: string | null;
+  status: "open" | "approved" | "rejected";
+  created_at: string;
+  closed_at: string | null;
+}
+
+/** Sign up without an invite. The new member waits outside the tree until confirmed. */
+export async function signUp(ctx: Ctx, person: PersonInput, loginValue: string, password: string) {
+  const any = await ctx.db.prepare(`SELECT 1 AS x FROM people LIMIT 1`).first();
+  if (!any) throw new HttpError(409, "not_started", "The tree has not been started yet.");
+  const normalized = normalizeLogin(loginValue ?? "");
+  const taken = await ctx.db.prepare(`SELECT 1 AS x FROM accounts WHERE login = ?`).bind(normalized).first();
+  if (taken) throw new HttpError(409, "login_taken", "This email or phone number is already used.");
+  const p = await insertPerson(ctx, { ...person, is_living: true }, null, false);
+  const accountId = await createAccount(ctx, p.id, loginValue, password);
+  return { personId: p.id, token: await createSession(ctx, accountId) };
+}
+
+/** Show only part of an email or phone number, enough for a relative to recognise it. */
+export function maskLogin(login: string): string {
+  if (login.includes("@")) {
+    const [name, domain] = login.split("@");
+    return `${name.slice(0, 2)}${"•".repeat(Math.max(2, Math.min(6, name.length - 2)))}@${domain}`;
+  }
+  if (login.length <= 7) return login.slice(0, 2) + "•".repeat(Math.max(0, login.length - 2));
+  return `${login.slice(0, 5)}${"•".repeat(login.length - 9)}${login.slice(-4)}`;
+}
+
+/** Find profiles in the tree by name, for a newcomer looking for themselves or a relative. */
+async function findInTree(ctx: Ctx, q: string) {
+  const { results } = await ctx.db
+    .prepare(
+      `SELECT id, full_name, birth_year, is_living FROM people
+       WHERE in_tree = 1 AND full_name LIKE ? ORDER BY full_name LIMIT 20`,
+    )
+    .bind(`%${q.replace(/[%_]/g, "")}%`)
+    .all<{ id: string; full_name: string; birth_year: number | null; is_living: number }>();
+  const out = [];
+  for (const p of results) {
+    // Only a little is shown: name, birth year, parents' names, and whether they joined.
+    const parents = [];
+    for (const id of await parentsOf(ctx, p.id)) parents.push((await getPerson(ctx, id)).full_name);
+    out.push({ ...p, parents, has_account: await hasAccount(ctx, p.id) });
+  }
+  return out;
+}
+
+async function checkRequestLimits(ctx: Ctx, requester: Person) {
+  if (requester.in_tree === 1) throw new HttpError(409, "already_in_tree", "You are already part of the tree.");
+  const open = await ctx.db
+    .prepare(`SELECT COUNT(*) AS n FROM join_requests WHERE requester_id = ? AND status = 'open'`)
+    .bind(requester.id)
+    .first<{ n: number }>();
+  if ((open?.n ?? 0) >= MAX_OPEN_REQUESTS) {
+    throw new HttpError(429, "too_many_requests", `You can have ${MAX_OPEN_REQUESTS} requests waiting at a time.`);
+  }
+  const since = new Date(ctx.now().getTime() - 86400_000).toISOString();
+  const today = await ctx.db
+    .prepare(`SELECT COUNT(*) AS n FROM join_requests WHERE requester_id = ? AND created_at > ?`)
+    .bind(requester.id, since)
+    .first<{ n: number }>();
+  if ((today?.n ?? 0) >= MAX_REQUESTS_PER_DAY) {
+    throw new HttpError(429, "too_many_requests", `You can send ${MAX_REQUESTS_PER_DAY} requests a day. Please try again tomorrow.`);
+  }
+}
+
+/**
+ * The relatives who confirm a newcomer: every member within 2 steps of the
+ * target (close family), or if none has joined, the 4 nearest members further out.
+ */
+async function pickCheckers(ctx: Ctx, targetId: string, requesterId: string) {
+  const dist = await distancesFrom(ctx, [targetId], MAX_TREE_DEPTH * 2);
+  const members: { id: string; d: number }[] = [];
+  for (const [id, d] of dist) {
+    if (id === requesterId) continue;
+    const p = await getPerson(ctx, id);
+    if (p.is_living !== 1 || p.in_tree !== 1 || !(await hasAccount(ctx, id))) continue;
+    members.push({ id, d });
+  }
+  // Whoever added the profile knows who it is for, even if their own link to it
+  // (a brother or sister, say) is still waiting for approval.
+  const target = await getPerson(ctx, targetId);
+  const adder = target.created_by;
+  if (adder && adder !== requesterId && !members.some((m) => m.id === adder)) {
+    const p = await getPerson(ctx, adder);
+    if (p.is_living === 1 && p.in_tree === 1 && (await hasAccount(ctx, adder)) && (await existingLink(ctx, adder, targetId))) {
+      members.push({ id: adder, d: 1 });
+    }
+  }
+  members.sort((x, y) => x.d - y.d);
+  const close = members.filter((m) => m.d <= CLOSE_FAMILY);
+  if (close.length) return shuffle(close, ctx.random).slice(0, MAX_CLOSE_CHECKERS);
+  return members.slice(0, FAR_CHECKERS);
+}
+
+async function openRequest(ctx: Ctx, kind: "claim" | "link", requesterId: string, targetId: string, relationId: string | null) {
+  const checkers = await pickCheckers(ctx, targetId, requesterId);
+  if (checkers.length === 0) {
+    throw new HttpError(409, "no_relatives", "None of this person's relatives has joined yet, so nobody can confirm you. Try another relative.");
+  }
+  const id = newId();
+  await ctx.db
+    .prepare(`INSERT INTO join_requests (id, kind, requester_id, target_id, relation_id, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?)`)
+    .bind(id, kind, requesterId, targetId, relationId, iso(ctx))
+    .run();
+  for (const c of checkers) {
+    await ctx.db
+      .prepare(`INSERT INTO join_checks (id, request_id, checker_id, distance, assigned_at) VALUES (?, ?, ?, ?, ?)`)
+      .bind(newId(), id, c.id, c.d, iso(ctx))
+      .run();
+  }
+  return describeRequest(ctx, id);
+}
+
+/** "This profile is me": a newcomer claims a profile a relative added for them. */
+export async function claimProfile(ctx: Ctx, actorId: string, targetId: string) {
+  const me = await getPerson(ctx, actorId);
+  await checkRequestLimits(ctx, me);
+  const target = await getPerson(ctx, targetId);
+  if (target.in_tree !== 1) throw new HttpError(404, "not_found", "Person not found.");
+  if (target.is_living !== 1) throw new HttpError(400, "bad_input", "A profile of someone who passed away can't be claimed.");
+  if (await hasAccount(ctx, targetId)) throw new HttpError(409, "already_member", "This person has already joined.");
+  if ((await relationsOf(ctx, actorId, ["active", "pending"])).length) {
+    throw new HttpError(409, "has_relatives", "Claim your profile before adding relatives, so they are not added twice.");
+  }
+  const taken = await ctx.db
+    .prepare(`SELECT 1 AS x FROM join_requests WHERE kind = 'claim' AND target_id = ? AND status = 'open'`)
+    .bind(targetId)
+    .first();
+  if (taken) throw new HttpError(409, "claim_open", "Someone has already asked to claim this profile. Their relatives are checking it.");
+  return openRequest(ctx, "claim", actorId, targetId, null);
+}
+
+/** "This person is my relative": a newcomer connects to someone already in the tree. */
+async function requestLink(ctx: Ctx, actorId: string, from: Person, existing: Person, kind: RelativeKind) {
+  const me = await getPerson(ctx, actorId);
+  await checkRequestLimits(ctx, me);
+  if (kind === "parent" && (await parentsOf(ctx, from.id)).length >= 2) {
+    throw new HttpError(409, "too_many_parents", "This person already has two parents.");
+  }
+  if (kind === "child" && (await parentsOf(ctx, existing.id)).length >= 2) {
+    throw new HttpError(409, "too_many_parents", "This person already has two parents.");
+  }
+  const rel = await insertRelation(ctx, {
+    type: kind === "child" || kind === "parent" ? "parent" : kind,
+    a_id: kind === "parent" ? existing.id : from.id,
+    b_id: kind === "parent" ? from.id : existing.id,
+    status: "pending",
+    approver_id: null, // confirmed by the relatives in join_checks
+    created_by: actorId,
+  });
+  try {
+    const request = await openRequest(ctx, "link", actorId, existing.id, rel.id);
+    return { person: existing, relations: [rel], request };
+  } catch (e) {
+    await ctx.db.prepare(`UPDATE relations SET status = 'rejected', decided_at = ? WHERE id = ?`).bind(iso(ctx), rel.id).run();
+    throw e;
+  }
+}
+
+async function describeRequest(ctx: Ctx, requestId: string) {
+  const r = await ctx.db.prepare(`SELECT * FROM join_requests WHERE id = ?`).bind(requestId).first<JoinRequest>();
+  if (!r) throw new HttpError(404, "not_found", "Request not found.");
+  const { results: checks } = await ctx.db
+    .prepare(`SELECT checker_id, distance, choice FROM join_checks WHERE request_id = ?`)
+    .bind(requestId)
+    .all<{ checker_id: string; distance: number; choice: string | null }>();
+  const requester = await getPerson(ctx, r.requester_id);
+  const target = await getPerson(ctx, r.target_id);
+  const relation = r.relation_id
+    ? await ctx.db.prepare(`SELECT * FROM relations WHERE id = ?`).bind(r.relation_id).first<Relation>()
+    : null;
+  const account = await ctx.db
+    .prepare(`SELECT login FROM accounts WHERE person_id = ?`)
+    .bind(r.status === "approved" && r.kind === "claim" ? r.target_id : r.requester_id)
+    .first<{ login: string }>();
+  return {
+    ...r,
+    requester_name: requester.full_name,
+    requester_login: account ? maskLogin(account.login) : null,
+    target_name: target.full_name,
+    relation,
+    checkers: checks.length,
+    yes: checks.filter((c) => c.choice === "yes").length,
+    no: checks.filter((c) => c.choice === "no").length,
+    close: checks.some((c) => c.distance <= CLOSE_FAMILY),
+  };
+}
+
+/** Requests waiting for this member to confirm or refuse. */
+export async function checksForMe(ctx: Ctx, actorId: string) {
+  const { results } = await ctx.db
+    .prepare(
+      `SELECT r.id FROM join_requests r JOIN join_checks c ON c.request_id = r.id
+       WHERE r.status = 'open' AND c.checker_id = ? AND c.choice IS NULL ORDER BY r.created_at`,
+    )
+    .bind(actorId)
+    .all<{ id: string }>();
+  const out = [];
+  for (const { id } of results) out.push(await describeRequest(ctx, id));
+  return out;
+}
+
+/** A newcomer's own requests, so they can see what they are waiting for. */
+export async function myRequests(ctx: Ctx, actorId: string) {
+  const { results } = await ctx.db
+    .prepare(`SELECT id FROM join_requests WHERE requester_id = ? ORDER BY created_at DESC LIMIT 10`)
+    .bind(actorId)
+    .all<{ id: string }>();
+  const out = [];
+  for (const { id } of results) out.push(await describeRequest(ctx, id));
+  return out;
+}
+
+/**
+ * A relative answers. With close family asked, the first answer decides.
+ * Otherwise 2 of the (up to 4) relatives further out must say yes.
+ */
+export async function answerRequest(ctx: Ctx, actorId: string, requestId: string, yes: boolean) {
+  const r = await ctx.db.prepare(`SELECT * FROM join_requests WHERE id = ?`).bind(requestId).first<JoinRequest>();
+  if (!r) throw new HttpError(404, "not_found", "Request not found.");
+  if (r.status !== "open") throw new HttpError(409, "closed", "This request has already been decided.");
+  const check = await ctx.db
+    .prepare(`SELECT * FROM join_checks WHERE request_id = ? AND checker_id = ?`)
+    .bind(requestId, actorId)
+    .first<{ id: string; distance: number; choice: string | null }>();
+  if (!check) throw new HttpError(403, "forbidden", "You were not asked to confirm this person.");
+  if (check.choice) throw new HttpError(409, "already_answered", "You have already answered.");
+  await ctx.db
+    .prepare(`UPDATE join_checks SET choice = ?, responded_at = ? WHERE id = ?`)
+    .bind(yes ? "yes" : "no", iso(ctx), check.id)
+    .run();
+
+  const { results: checks } = await ctx.db
+    .prepare(`SELECT distance, choice FROM join_checks WHERE request_id = ?`)
+    .bind(requestId)
+    .all<{ distance: number; choice: string | null }>();
+  const close = checks.some((c) => c.distance <= CLOSE_FAMILY);
+  const yesCount = checks.filter((c) => c.choice === "yes").length;
+  const noCount = checks.filter((c) => c.choice === "no").length;
+  let outcome: "approved" | "rejected" | null = null;
+  if (close) outcome = yes ? "approved" : "rejected";
+  else {
+    // Two must say yes, or every one of them when fewer than two could be asked.
+    const needed = Math.min(FAR_YES_NEEDED, checks.length);
+    if (yesCount >= needed) outcome = "approved";
+    else if (noCount > checks.length - needed) outcome = "rejected";
+  }
+
+  if (outcome) await closeRequest(ctx, r, outcome);
+  return describeRequest(ctx, requestId);
+}
+
+async function closeRequest(ctx: Ctx, r: JoinRequest, outcome: "approved" | "rejected") {
+  await ctx.db.prepare(`UPDATE join_requests SET status = ?, closed_at = ? WHERE id = ?`).bind(outcome, iso(ctx), r.id).run();
+  if (r.kind === "link") {
+    await ctx.db
+      .prepare(`UPDATE relations SET status = ?, decided_at = ? WHERE id = ?`)
+      .bind(outcome === "approved" ? "active" : "rejected", iso(ctx), r.relation_id)
+      .run();
+    if (outcome === "approved") {
+      await bringIntoTree(ctx, r.requester_id);
+      const rel = (await ctx.db.prepare(`SELECT * FROM relations WHERE id = ?`).bind(r.relation_id).first<Relation>())!;
+      if (rel.type === "parent") await linkImpliedSiblings(ctx, r.requester_id, rel.a_id, rel.b_id);
+    }
+    return;
+  }
+  if (outcome !== "approved") return;
+  // A claim: the newcomer's login moves onto the profile their relatives made,
+  // and the empty sign-up profile is removed.
+  if (await hasAccount(ctx, r.target_id)) {
+    await ctx.db.prepare(`UPDATE join_requests SET status = 'rejected' WHERE id = ?`).bind(r.id).run();
+    return;
+  }
+  const temp = await getPerson(ctx, r.requester_id);
+  const target = await getPerson(ctx, r.target_id);
+  await ctx.db.prepare(`UPDATE accounts SET person_id = ? WHERE person_id = ?`).bind(r.target_id, r.requester_id).run();
+  await ctx.db
+    .prepare(`UPDATE people SET gender = COALESCE(gender, ?), birth_year = COALESCE(birth_year, ?) WHERE id = ?`)
+    .bind(temp.gender, temp.birth_year, target.id)
+    .run();
+  // Other requests the newcomer had waiting are no longer needed.
+  const { results: others } = await ctx.db
+    .prepare(`SELECT * FROM join_requests WHERE requester_id = ? AND status = 'open' AND id != ?`)
+    .bind(r.requester_id, r.id)
+    .all<JoinRequest>();
+  for (const o of others) {
+    await ctx.db.prepare(`UPDATE join_requests SET status = 'rejected', closed_at = ? WHERE id = ?`).bind(iso(ctx), o.id).run();
+    if (o.relation_id) await ctx.db.prepare(`UPDATE relations SET status = 'rejected' WHERE id = ?`).bind(o.relation_id).run();
+  }
+  await ctx.db.prepare(`UPDATE join_requests SET requester_id = ? WHERE requester_id = ?`).bind(r.target_id, r.requester_id).run();
+  await ctx.db.prepare(`UPDATE relations SET created_by = ? WHERE created_by = ?`).bind(r.target_id, r.requester_id).run();
+  await ctx.db.prepare(`DELETE FROM people WHERE id = ?`).bind(r.requester_id).run();
+}
+
+/** Once confirmed, the newcomer and everyone they added become part of the tree. */
+async function bringIntoTree(ctx: Ctx, personId: string) {
+  const seen = new Set([personId]);
+  const queue = [personId];
+  while (queue.length) {
+    const id = queue.shift()!;
+    await ctx.db.prepare(`UPDATE people SET in_tree = 1 WHERE id = ?`).bind(id).run();
+    for (const r of await relationsOf(ctx, id, ["active", "pending"])) {
+      for (const other of [r.a_id, r.b_id]) {
+        if (seen.has(other)) continue;
+        seen.add(other);
+        if ((await getPerson(ctx, other)).in_tree === 0) queue.push(other);
+      }
+    }
+  }
 }

@@ -31,6 +31,8 @@ export default function RootLayout() {
           <Stack.Screen name="tree" options={{ title: "One Family" }} />
           <Stack.Screen name="person/[id]" options={{ title: "Person" }} />
           <Stack.Screen name="inbox" options={{ title: "Requests and votes" }} />
+          <Stack.Screen name="join" options={{ title: "Join the tree" }} />
+          <Stack.Screen name="find" options={{ title: "Find your family", headerBackVisible: false }} />
         </Stack>
       </AuthProvider>
     </SafeAreaProvider>

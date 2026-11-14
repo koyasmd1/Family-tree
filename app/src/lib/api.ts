@@ -13,6 +13,8 @@ export interface TreePerson {
   is_living: number;
   has_account: boolean;
   can_edit: boolean;
+  /** 0 while a newcomer waits for a relative to confirm them. */
+  in_tree?: number;
   gender?: string | null;
   birth_year?: number | null;
   death_year?: number | null;
@@ -53,6 +55,40 @@ export interface Vote {
   disagree: number;
   a_name?: string;
   b_name?: string;
+}
+
+/** A newcomer asking to join: "this profile is me" (claim) or "this person is my relative" (link). */
+export interface JoinRequest {
+  id: string;
+  kind: "claim" | "link";
+  requester_id: string;
+  target_id: string;
+  status: "open" | "approved" | "rejected";
+  requester_name: string;
+  requester_login: string | null;
+  target_name: string;
+  relation: Relation | null;
+  checkers: number;
+  yes: number;
+  no: number;
+  close: boolean;
+}
+
+export interface FoundPerson {
+  id: string;
+  full_name: string;
+  birth_year: number | null;
+  is_living: number;
+  parents?: string[];
+  has_account?: boolean;
+}
+
+export interface Me {
+  person: TreePerson;
+  pending: PendingRelation[];
+  votes: Vote[];
+  checks: JoinRequest[];
+  requests: JoinRequest[];
 }
 
 export interface PersonInput {
@@ -100,22 +136,27 @@ export function api(token: string | null) {
     login: (login: string, password: string) =>
       request<{ personId: string; token: string }>("POST", "/login", null, { login, password }),
     logout: () => request("POST", "/logout", token),
+    signUp: (person: PersonInput, login: string, password: string) =>
+      request<{ personId: string; token: string }>("POST", "/signup", null, { person, login, password }),
+    claim: (personId: string) => request<JoinRequest>("POST", "/claims", token, { person_id: personId }),
+    answerRequest: (requestId: string, yes: boolean) =>
+      request<JoinRequest>("POST", `/join-requests/${requestId}/answer`, token, { yes }),
     getInvite: (inviteToken: string) =>
       request<{ person: TreePerson; invitedBy: string }>("GET", `/invites/${inviteToken}`, null),
     acceptInvite: (inviteToken: string, login: string, password: string) =>
       request<{ personId: string; token: string }>("POST", `/invites/${inviteToken}/accept`, null, { login, password }),
-    me: () => request<{ person: TreePerson; pending: PendingRelation[]; votes: Vote[] }>("GET", "/me", token),
+    me: () => request<Me>("GET", "/me", token),
     tree: (root?: string, depth = 3) =>
       request<Tree>("GET", `/tree?depth=${depth}${root ? `&root=${encodeURIComponent(root)}` : ""}`, token),
     search: (q: string) =>
-      request<{ id: string; full_name: string; birth_year: number | null; is_living: number }[]>(
+      request<FoundPerson[]>(
         "GET",
         `/search?q=${encodeURIComponent(q)}`,
         token,
       ),
     updatePerson: (id: string, input: Partial<PersonInput>) => request<TreePerson>("PATCH", `/people/${id}`, token, input),
     addRelative: (input: { kind: RelativeKind; of: string; person?: PersonInput; existingPersonId?: string; otherParentId?: string }) =>
-      request<{ person: TreePerson; relations: Relation[] }>("POST", "/relatives", token, input),
+      request<{ person: TreePerson; relations: Relation[]; request?: JoinRequest }>("POST", "/relatives", token, input),
     decide: (relationId: string, approve: boolean) =>
       request<Relation>("POST", `/relations/${relationId}/decision`, token, { approve }),
     setDivorced: (relationId: string, divorced: boolean) =>

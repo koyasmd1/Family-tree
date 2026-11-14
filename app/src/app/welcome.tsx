@@ -38,8 +38,8 @@ export default function Welcome() {
         <Title>Everyone on earth, one family tree.</Title>
       </NorthernGlow>
       <Body muted>
-        Joining is by invitation. A relative who is already in the tree adds you and sends you a link. Already a
-        member? Sign in below.
+        Join the tree, find yourself or a relative, and a family member who has already joined confirms it's you.
+        Already a member? Sign in below.
       </Body>
       <Card>
         <Field label="Email or phone number" value={login} onChangeText={setLogin} autoCapitalize="none" autoComplete="username" keyboardType="email-address" />
@@ -47,6 +47,7 @@ export default function Welcome() {
         <ErrorText>{error}</ErrorText>
         <Button title="Sign in" onPress={submit} busy={busy} disabled={!login || !password} />
       </Card>
+      <Button kind="secondary" title="New here? Join the tree" onPress={() => router.push("/join")} />
     </Screen>
   );
 }
