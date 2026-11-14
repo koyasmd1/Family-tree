@@ -62,6 +62,12 @@ export function createApp(makeCtx?: (env: Env) => rules.Ctx) {
     return c.json(await rules.login(c.get("ctx"), b.login, b.password));
   });
 
+  // Anyone can sign up; relatives then confirm who they are.
+  app.post("/signup", async (c) => {
+    const b = await body(c);
+    return c.json(await rules.signUp(c.get("ctx"), b.person, b.login, b.password), 201);
+  });
+
   app.get("/invites/:token", async (c) => c.json(await rules.getInvite(c.get("ctx"), c.req.param("token"))));
 
   app.post("/invites/:token/accept", async (c) => {
@@ -89,6 +95,8 @@ export function createApp(makeCtx?: (env: Env) => rules.Ctx) {
       person: await rules.getPerson(ctx, me),
       pending: await rules.pendingForMe(ctx, me),
       votes: await rules.votesForMe(ctx, me),
+      checks: await rules.checksForMe(ctx, me),
+      requests: await rules.myRequests(ctx, me),
     });
   });
 
@@ -132,6 +140,16 @@ export function createApp(makeCtx?: (env: Env) => rules.Ctx) {
   authed.post("/votes/:id/ballot", async (c) => {
     const b = await body(c);
     return c.json(await rules.castBallot(c.get("ctx"), c.get("me"), c.req.param("id"), b.choice));
+  });
+
+  authed.post("/claims", async (c) => {
+    const b = await body(c);
+    return c.json(await rules.claimProfile(c.get("ctx"), c.get("me"), b.person_id), 201);
+  });
+
+  authed.post("/join-requests/:id/answer", async (c) => {
+    const b = await body(c);
+    return c.json(await rules.answerRequest(c.get("ctx"), c.get("me"), c.req.param("id"), b.yes === true));
   });
 
   app.route("/", authed);

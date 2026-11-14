@@ -28,6 +28,7 @@ class Stmt {
 
 export function testDb(): D1Database {
   const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON"); // D1 checks foreign keys too
   const dir = join(import.meta.dirname, "..", "migrations");
   for (const file of readdirSync(dir).sort()) db.exec(readFileSync(join(dir, file), "utf8"));
   return { prepare: (sql: string) => new Stmt(db, sql) } as unknown as D1Database;
