@@ -8,8 +8,8 @@ import { colors, fonts } from "@/lib/theme";
 import { PersonCard } from "@/components/PersonCard";
 import { Rise } from "@/components/animations";
 import { Celebration, type Moment } from "@/components/Celebration";
-import { Constellation, EarthEmbrace, Heartline } from "@/components/moments";
 import { TreeLines, type Box } from "@/components/TreeLines";
+import { CircleTree } from "@/components/CircleTree";
 import { Body, Button, ErrorText, Loading } from "@/components/ui";
 
 export default function TreeScreen() {
@@ -22,6 +22,8 @@ export default function TreeScreen() {
   const [moment, setMoment] = useState<Moment | null>(null);
   const closeMoment = useCallback(() => setMoment(null), []);
   const lines = useCardBoxes(tree);
+  const [view, setView] = useState<"circle" | "rows">("circle");
+  const [area, setArea] = useState({ w: 0, h: 0 });
 
   const journeyShown = useRef<string | null>(null);
   const load = useCallback(async () => {
@@ -29,13 +31,14 @@ export default function TreeScreen() {
     setError("");
     try {
       const client = api(token);
-      const me = await client.me();
+      // Ask for both at the same time instead of one after the other.
+      const [me, t] = await Promise.all([client.me(), client.tree(root, 4).catch((e) => e as Error)]);
       // Someone who signed up is not part of the tree until a relative confirms them.
       if (me.person.in_tree === 0) {
         router.replace("/find");
         return;
       }
-      const t = await client.tree(root, 3);
+      if (t instanceof Error) throw t;
       setTree(t);
       setWaiting(me.pending.length + me.votes.length + me.checks.length);
       // 24 "Journey Back in Time": opening the tree of an older relative.
@@ -112,61 +115,83 @@ export default function TreeScreen() {
   }
 
   const { rows } = placeTree(tree);
+  const alone = tree.people.length === 1;
+  const open = (id: string) => router.push({ pathname: "/person/[id]", params: { id } });
   return (
     <>
       {header}
       <View style={{ flex: 1, backgroundColor: colors.night }}>
-        <Constellation />
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={styles.content}
-          onContentSizeChange={lines.onContentSize}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              tintColor={colors.gold}
-              onRefresh={async () => {
-                setRefreshing(true);
-                await load();
-                setRefreshing(false);
-              }}
-            />
-          }
-        >
-          <TreeLines relations={tree.relations} boxes={lines.boxes} width={lines.size.w} height={lines.size.h} />
-          <Text style={styles.tagline}>Every name is a light. Every line is a bond.</Text>
-          <ErrorText>{error}</ErrorText>
-          {rows.map((row, i) => (
-            <Rise key={row.generation} index={i} onLayout={lines.onRow(row.generation)}>
-              <View style={styles.row}>
-                <Text style={styles.rowTitle}>{generationName(row.generation)}</Text>
-                <View style={styles.cards} onLayout={lines.onCards(row.generation)}>
-                  {row.people.map((p) => (
-                    <PersonCard
-                      key={p.person.id}
-                      person={p.person}
-                      label={p.label}
-                      isMe={p.person.id === tree.me}
-                      pending={p.pending}
-                      onLayout={lines.onCard(p.person.id, row.generation)}
-                      onPress={() => router.push({ pathname: "/person/[id]", params: { id: p.person.id } })}
-                    />
-                  ))}
-                </View>
-              </View>
-            </Rise>
+        <View style={styles.switch} accessibilityRole="tablist">
+          {(["circle", "rows"] as const).map((v) => (
+            <Pressable
+              key={v}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: view === v }}
+              onPress={() => setView(v)}
+              style={[styles.switchBtn, view === v && styles.switchOn]}
+            >
+              <Text style={[styles.switchText, view === v && { color: colors.night }]}>{v === "circle" ? "Everyone around me" : "By generation"}</Text>
+            </Pressable>
           ))}
-          {rows.length === 1 && rows[0].people.length === 1 && (
-            <View style={{ alignItems: "center", gap: 8 }}>
-              <Heartline size={200} />
-              <Body muted>Your tree starts with you. Tap your card to add your parents, children, brothers and sisters.</Body>
-            </View>
-          )}
-          {root && root !== tree.me && <Button kind="secondary" title="Back to my tree" onPress={() => router.replace("/tree")} />}
-          <View style={styles.footer}>
-            <EarthEmbrace size={180} />
+        </View>
+        <ErrorText>{error}</ErrorText>
+        {view === "circle" ? (
+          <View style={{ flex: 1 }} onLayout={(e) => setArea({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+            {area.w > 0 && <CircleTree tree={tree} width={area.w} height={area.h} onOpen={open} />}
+            {alone && (
+              <View style={styles.hint} pointerEvents="none">
+                <Body muted>Your tree starts with you. Tap your circle to add your parents, children, brothers and sisters.</Body>
+              </View>
+            )}
+            {root && root !== tree.me && (
+              <View style={styles.back}>
+                <Button kind="secondary" title="Back to my tree" onPress={() => router.replace("/tree")} />
+              </View>
+            )}
           </View>
-        </ScrollView>
+        ) : (
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.content}
+            onContentSizeChange={lines.onContentSize}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                tintColor={colors.gold}
+                onRefresh={async () => {
+                  setRefreshing(true);
+                  await load();
+                  setRefreshing(false);
+                }}
+              />
+            }
+          >
+            <TreeLines relations={tree.relations} boxes={lines.boxes} width={lines.size.w} height={lines.size.h} />
+            <Text style={styles.tagline}>Every name is a light. Every line is a bond.</Text>
+            {rows.map((row, i) => (
+              <Rise key={row.generation} index={i} onLayout={lines.onRow(row.generation)}>
+                <View style={styles.row}>
+                  <Text style={styles.rowTitle}>{generationName(row.generation)}</Text>
+                  <View style={styles.cards} onLayout={lines.onCards(row.generation)}>
+                    {row.people.map((p) => (
+                      <PersonCard
+                        key={p.person.id}
+                        person={p.person}
+                        label={p.label}
+                        isMe={p.person.id === tree.me}
+                        pending={p.pending}
+                        onLayout={lines.onCard(p.person.id, row.generation)}
+                        onPress={() => open(p.person.id)}
+                      />
+                    ))}
+                  </View>
+                </View>
+              </Rise>
+            ))}
+            {alone && <Body muted>Your tree starts with you. Tap your card to add your parents, children, brothers and sisters.</Body>}
+            {root && root !== tree.me && <Button kind="secondary" title="Back to my tree" onPress={() => router.replace("/tree")} />}
+          </ScrollView>
+        )}
       </View>
       <Celebration moment={moment} onDone={closeMoment} />
     </>
@@ -240,5 +265,10 @@ const styles = StyleSheet.create({
   headerText: { fontFamily: fonts.bodyMedium, fontSize: 15, color: colors.text },
   badge: { minWidth: 20, height: 20, borderRadius: 10, backgroundColor: colors.gold, alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
   badgeText: { fontFamily: fonts.bodyBold, fontSize: 12, color: colors.night },
-  footer: { alignItems: "center", marginTop: 24 },
+  switch: { flexDirection: "row", alignSelf: "center", margin: 10, padding: 3, borderRadius: 22, borderWidth: 1, borderColor: colors.lanternBorder, backgroundColor: colors.deep },
+  switchBtn: { minHeight: 40, paddingHorizontal: 14, borderRadius: 19, justifyContent: "center" },
+  switchOn: { backgroundColor: colors.gold },
+  switchText: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.text },
+  hint: { position: "absolute", left: 20, right: 76, bottom: 24 },
+  back: { position: "absolute", left: 16, bottom: 16 },
 });

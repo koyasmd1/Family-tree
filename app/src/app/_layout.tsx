@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useFonts } from "expo-font";
@@ -11,7 +12,8 @@ import { colors, fonts } from "@/lib/theme";
 export default function RootLayout() {
   const [loaded, error] = useFonts({ Fraunces_500Medium, Fraunces_700Bold, Inter_400Regular, Inter_500Medium, Inter_600SemiBold });
   // If fonts fail to load (e.g. offline), carry on with system fonts.
-  if (!loaded && !error) return <Loading />;
+  // On the website, don't wait for them: show the page at once and let the fonts swap in.
+  if (!loaded && !error && Platform.OS !== "web") return <Loading />;
 
   return (
     <SafeAreaProvider>

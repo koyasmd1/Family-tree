@@ -10,6 +10,10 @@ database_name = "onefamily"
 database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
 migrations_dir = "migrations"
 
+# Run the server close to the database, so each query is a short trip.
+[placement]
+mode = "smart"
+
 [vars]
 # The website address that may call this API from a browser.
 ALLOWED_ORIGIN = "*"

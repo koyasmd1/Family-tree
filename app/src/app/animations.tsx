@@ -72,7 +72,7 @@ function MiniTree() {
   const relations = [rel("r1", "parent", "p1", "c"), rel("r2", "parent", "p2", "c"), rel("r3", "spouse", "p1", "p2")];
   return (
     <View style={{ width: 220, height: 180 }}>
-      <TreeLines relations={relations} boxes={boxes} width={220} height={180} />
+      <TreeLines lively relations={relations} boxes={boxes} width={220} height={180} />
       {[...boxes.entries()].map(([id, b]) => (
         <View key={id} style={[styles.miniCard, { left: b.x, top: b.y, width: b.w, height: b.h }]} />
       ))}
@@ -97,8 +97,8 @@ export default function AnimationsGallery() {
         </Tile>
         <Tile n="03, 05, 07" name="Lantern Ancestors, Ripple of Kinship, Waiting Breath" where="Cards in the tree">
           <View style={{ gap: 0, alignItems: "center", transform: [{ scale: 0.8 }] }}>
-            <PersonCard person={person("a", "Yusuf", { is_living: 0, birth_year: 1925, death_year: 1998 })} label="Grandfather" isMe={false} pending={false} onPress={() => undefined} />
-            <PersonCard person={person("b", "You")} label="You" isMe pending={false} onPress={() => undefined} />
+            <PersonCard animate person={person("a", "Yusuf", { is_living: 0, birth_year: 1925, death_year: 1998 })} label="Grandfather" isMe={false} pending={false} onPress={() => undefined} />
+            <PersonCard animate person={person("b", "You")} label="You" isMe pending={false} onPress={() => undefined} />
           </View>
         </Tile>
         <Tile n="04" name="Family Constellation" where="Behind the tree">
@@ -115,7 +115,7 @@ export default function AnimationsGallery() {
           <WovenThreads size={200} />
         </Tile>
         <Tile n="07" name="Waiting Breath" where="A link awaiting approval">
-          <PersonCard person={person("s", "Sara")} label="Sister" isMe={false} pending onPress={() => undefined} />
+          <PersonCard animate person={person("s", "Sara")} label="Sister" isMe={false} pending onPress={() => undefined} />
         </Tile>
         <Tile n="09" name="Birth Bloom" where="Adding a child">
           <BirthBloom size={200} />
