@@ -114,71 +114,57 @@ describe("rule: parents and children are linked straight away", () => {
   });
 });
 
-describe("rule: siblings and spouses need approval", () => {
-  it("keeps a sibling pending until they join and approve", async () => {
+describe("rule: anyone can add any relative straight away", () => {
+  it("adds a sibling at once, with no approval needed", async () => {
     const a = await starter();
     const sis = await add(a.token, a.id, "sibling", { full_name: "Sara" });
     const rel = sis.relations[0];
-    expect(rel.status).toBe("pending");
-    expect(rel.approver_id).toBe(sis.person.id);
-
+    expect(rel.status).toBe("active");
+    expect(rel.approver_id).toBeNull();
     const sisToken = await join(a.token, sis.person.id);
-    const inbox = await me(sisToken);
-    expect(inbox.pending.map((p: any) => p.id)).toEqual([rel.id]);
-
-    // The person who added it cannot approve it themselves.
-    expect((await call("POST", `/relations/${rel.id}/decision`, { token: a.token, body: { approve: true } })).status).toBe(403);
-
-    const ok = await call("POST", `/relations/${rel.id}/decision`, { token: sisToken, body: { approve: true } });
-    expect(ok.json.status).toBe("active");
+    expect((await me(sisToken)).pending).toHaveLength(0);
   });
 
-  it("lets you open the page of a relative whose link is still pending", async () => {
-    const a = await starter();
-    const sis = await add(a.token, a.id, "sibling", { full_name: "Sara" });
-    const r = await call("GET", `/tree?root=${sis.person.id}&depth=1`, { token: a.token });
-    expect(r.status).toBe(200);
-    expect(r.json.people.map((p: any) => p.id).sort()).toEqual([a.id, sis.person.id].sort());
-    expect(r.json.relations[0].status).toBe("pending");
-  });
-
-  it("lets a spouse reject a wrong request", async () => {
+  it("adds a husband or wife at once", async () => {
     const a = await starter();
     const w = await add(a.token, a.id, "spouse", { full_name: "Noor" });
-    const wToken = await join(a.token, w.person.id);
-    const r = await call("POST", `/relations/${w.relations[0].id}/decision`, { token: wToken, body: { approve: false } });
-    expect(r.json.status).toBe("rejected");
+    expect(w.relations[0].status).toBe("active");
+    const r = await call("GET", `/tree?root=${w.person.id}&depth=1`, { token: a.token });
+    expect(r.status).toBe(200);
+    expect(r.json.people.map((p: any) => p.id).sort()).toEqual([a.id, w.person.id].sort());
   });
 
-  it("accepts a sibling who has passed away, since they cannot approve", async () => {
+  it("accepts a sibling who has passed away", async () => {
     const a = await starter();
     const b = await add(a.token, a.id, "sibling", { full_name: "Late brother", is_living: false });
     expect(b.relations[0].status).toBe("active");
   });
 
-  it("asks the existing sibling to confirm a new child added under shared parents", async () => {
+  it("links a new child under shared parents as a sibling straight away", async () => {
     const a = await starter();
     const father = await add(a.token, a.id, "parent", { full_name: "Father" });
     const fToken = await join(a.token, father.person.id);
-
     const newChild = await add(fToken, father.person.id, "child", { full_name: "Ali" });
-    expect(newChild.relations[0].status).toBe("active"); // the parent link itself
-
-    const inbox = await me(a.token);
-    expect(inbox.pending).toHaveLength(1);
-    const implied = inbox.pending[0];
-    expect(implied.type).toBe("sibling");
-    expect([implied.a_id, implied.b_id].sort()).toEqual([a.id, newChild.person.id].sort());
-
-    const ok = await call("POST", `/relations/${implied.id}/decision`, { token: a.token, body: { approve: true } });
-    expect(ok.json.status).toBe("active");
+    expect(newChild.relations[0].status).toBe("active");
+    expect((await me(a.token)).pending).toHaveLength(0);
+    const tree = (await call("GET", "/tree?depth=1", { token: a.token })).json;
+    const sib = tree.relations.find((r: any) => r.type === "sibling");
+    expect(sib.status).toBe("active");
+    expect([sib.a_id, sib.b_id].sort()).toEqual([a.id, newChild.person.id].sort());
   });
 
-  it("marks an approved marriage as divorced", async () => {
+  it("lets a member add relatives to another member", async () => {
+    const a = await starter();
+    const f = await add(a.token, a.id, "parent", { full_name: "Father" });
+    const fToken = await join(a.token, f.person.id);
+    const r = await call("POST", "/relatives", { token: fToken, body: { of: a.id, kind: "child", person: { full_name: "X" } } });
+    expect(r.status).toBe(201);
+    expect(r.json.relations[0].status).toBe("active");
+  });
+
+  it("marks a marriage as divorced", async () => {
     const a = await starter();
     const w = await add(a.token, a.id, "spouse", { full_name: "Noor" });
-    const wToken = await join(a.token, w.person.id);
-    await call("POST", `/relations/${w.relations[0].id}/decision`, { token: wToken, body: { approve: true } });
     const r = await call("POST", `/relations/${w.relations[0].id}/divorced`, { token: a.token, body: { divorced: true } });
     expect(r.json.divorced).toBe(1);
   });
@@ -193,14 +179,6 @@ describe("rule: joining is invite-only", () => {
     expect(info.json.invitedBy).toBe("Koyas");
     expect((await call("POST", `/invites/${inv.json.token}/accept`, { body: { login: "f@example.com", password: "password123" } })).status).toBe(201);
     expect((await call("POST", `/invites/${inv.json.token}/accept`, { body: { login: "g@example.com", password: "password123" } })).status).toBe(410);
-  });
-
-  it("does not let a member add relatives to another member", async () => {
-    const a = await starter();
-    const f = await add(a.token, a.id, "parent", { full_name: "Father" });
-    const fToken = await join(a.token, f.person.id);
-    const r = await call("POST", "/relatives", { token: fToken, body: { of: a.id, kind: "child", person: { full_name: "X" } } });
-    expect(r.status).toBe(403);
   });
 
   it("cannot invite someone who already joined", async () => {
@@ -233,8 +211,6 @@ async function voteFamily() {
   tokens.K = await join(a.token, K.person.id);
   tokens.W = await join(a.token, W.person.id);
   tokens.S = await join(a.token, S.person.id);
-  await call("POST", `/relations/${W.relations[0].id}/decision`, { token: tokens.W, body: { approve: true } });
-  await call("POST", `/relations/${S.relations[0].id}/decision`, { token: tokens.S, body: { approve: true } });
   const G = await add(tokens.F, F.person.id, "parent", { full_name: "Grandfather", birth_year: 1935 });
   tokens.G = await join(tokens.F, G.person.id);
   const ids = { A: a.id, F: F.person.id, M: M.person.id, K: K.person.id, W: W.person.id, S: S.person.id, G: G.person.id };

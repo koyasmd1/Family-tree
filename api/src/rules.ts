@@ -362,48 +362,22 @@ async function childrenOf(ctx: Ctx, personId: string): Promise<string[]> {
 }
 
 /**
- * Who approves a sibling or spouse link with `target`: the target themselves.
- * Someone who passed away can never approve, so their link is accepted.
- * Returns null when the link can be active straight away.
- */
-async function approverFor(ctx: Ctx, target: string, other: string, actorId: string | null): Promise<string | null> {
-  const t = await getPerson(ctx, target);
-  if (t.is_living === 1 && target !== actorId) return target;
-  // Target can't approve (passed away) or is the one creating it: ask the other side if it isn't the actor.
-  const o = await getPerson(ctx, other);
-  if (o.is_living === 1 && other !== actorId && (await hasAccount(ctx, other))) return other;
-  return null;
-}
-
-/**
  * When `child` gets a new parent, every other child of that parent becomes a
- * sibling. Those sibling links need approval (rule 3).
+ * sibling. Agreed 2026-11-19: added relatives are linked straight away, no approval.
  */
 async function linkImpliedSiblings(ctx: Ctx, actorId: string, parentId: string, child: string) {
   for (const sibling of await childrenOf(ctx, parentId)) {
     if (sibling === child) continue;
     if (await existingLink(ctx, sibling, child)) continue;
-    const approver = await impliedSiblingApprover(ctx, actorId, sibling, child);
     await insertRelation(ctx, {
       type: "sibling",
       a_id: sibling,
       b_id: child,
-      status: approver ? "pending" : "active",
-      approver_id: approver,
+      status: "active",
+      approver_id: null,
       created_by: actorId,
     });
   }
-}
-
-async function impliedSiblingApprover(ctx: Ctx, actorId: string, existing: string, added: string) {
-  // The sibling who was already in the tree confirms the newcomer, if they can.
-  for (const candidate of [existing, added]) {
-    if (candidate === actorId) continue;
-    const p = await getPerson(ctx, candidate);
-    if (p.is_living === 1 && (await hasAccount(ctx, candidate))) return candidate;
-  }
-  // Nobody else can confirm (for example a parent adding two babies): accept it.
-  return null;
 }
 
 export interface AddRelativeInput {
@@ -419,9 +393,12 @@ export async function addRelative(ctx: Ctx, actorId: string, input: AddRelativeI
   if (!["parent", "child", "sibling", "spouse"].includes(kind)) {
     throw new HttpError(400, "bad_input", "Relation must be parent, child, sibling or spouse.");
   }
-  await getPerson(ctx, of);
-  if (!(await canManage(ctx, actorId, of))) {
-    throw new HttpError(403, "forbidden", "You can add relatives to yourself, or to close relatives who have no account.");
+  const target = await getPerson(ctx, of);
+  // Anyone in the tree may add relatives to anyone in the tree (agreed 2026-11-19).
+  // Someone who has not been confirmed yet can only add to their own profile.
+  const actor = await getPerson(ctx, actorId);
+  if (actorId !== of && !(actor.in_tree === 1 && target.in_tree === 1)) {
+    throw new HttpError(403, "forbidden", "You can add relatives once you are part of the tree.");
   }
 
   let relativeId: string;
@@ -488,15 +465,14 @@ export async function addRelative(ctx: Ctx, actorId: string, input: AddRelativeI
       await linkImpliedSiblings(ctx, actorId, input.otherParentId, relativeId);
     }
   } else {
-    // Sibling or spouse: rule 3, the other person approves.
-    const approver = await approverFor(ctx, relativeId, of, actorId);
+    // Sibling or spouse: linked straight away too. A wrong link can be removed by an objection vote.
     created.push(
       await insertRelation(ctx, {
         type: kind,
         a_id: of,
         b_id: relativeId,
-        status: approver ? "pending" : "active",
-        approver_id: approver,
+        status: "active",
+        approver_id: null,
         created_by: actorId,
       }),
     );
@@ -999,7 +975,16 @@ async function checkRequestLimits(ctx: Ctx, requester: Person) {
  * The relatives who confirm a newcomer: every member within 2 steps of the
  * target (close family), or if none has joined, the 4 nearest members further out.
  */
-async function pickCheckers(ctx: Ctx, targetId: string, requesterId: string) {
+async function pickCheckers(ctx: Ctx, targetId: string, requesterId: string, kind: "claim" | "link") {
+  // "Find me": the person who added the profile knows who it is for, so they alone approve the claim.
+  if (kind === "claim") {
+    const adder = (await getPerson(ctx, targetId)).created_by;
+    if (adder && adder !== requesterId) {
+      const p = await getPerson(ctx, adder);
+      if (p.is_living === 1 && p.in_tree === 1 && (await hasAccount(ctx, adder))) return [{ id: adder, d: 1 }];
+    }
+    // Whoever added it is no longer here: nearby relatives confirm instead (below).
+  }
   const dist = await distancesFrom(ctx, [targetId], MAX_TREE_DEPTH * 2);
   const members: { id: string; d: number }[] = [];
   for (const [id, d] of dist) {
@@ -1008,16 +993,6 @@ async function pickCheckers(ctx: Ctx, targetId: string, requesterId: string) {
     if (p.is_living !== 1 || p.in_tree !== 1 || !(await hasAccount(ctx, id))) continue;
     members.push({ id, d });
   }
-  // Whoever added the profile knows who it is for, even if their own link to it
-  // (a brother or sister, say) is still waiting for approval.
-  const target = await getPerson(ctx, targetId);
-  const adder = target.created_by;
-  if (adder && adder !== requesterId && !members.some((m) => m.id === adder)) {
-    const p = await getPerson(ctx, adder);
-    if (p.is_living === 1 && p.in_tree === 1 && (await hasAccount(ctx, adder)) && (await existingLink(ctx, adder, targetId))) {
-      members.push({ id: adder, d: 1 });
-    }
-  }
   members.sort((x, y) => x.d - y.d);
   const close = members.filter((m) => m.d <= CLOSE_FAMILY);
   if (close.length) return shuffle(close, ctx.random).slice(0, MAX_CLOSE_CHECKERS);
@@ -1025,7 +1000,7 @@ async function pickCheckers(ctx: Ctx, targetId: string, requesterId: string) {
 }
 
 async function openRequest(ctx: Ctx, kind: "claim" | "link", requesterId: string, targetId: string, relationId: string | null) {
-  const checkers = await pickCheckers(ctx, targetId, requesterId);
+  const checkers = await pickCheckers(ctx, targetId, requesterId, kind);
   if (checkers.length === 0) {
     throw new HttpError(409, "no_relatives", "None of this person's relatives has joined yet, so nobody can confirm you. Try another relative.");
   }

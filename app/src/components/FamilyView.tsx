@@ -93,19 +93,21 @@ export function FamilyView({ tree, width, height, onFocus, onOpen }: { tree: Tre
         rings.forEach((r) => (r.x += shift));
         right += shift;
       }
-      view.parents.forEach((p, i) => cards.push({ m: p, kind: "parent", x: px + i * (W + SPOUSE_GAP), y: y0 }));
+      // The parents' family colour, shared with their children who are not married yet.
+      const home = householdColours[0];
+      view.parents.forEach((p, i) => cards.push({ m: p, kind: "parent", x: px + i * (W + SPOUSE_GAP), y: y0, tint: home }));
       if (view.parents.length === 2) {
-        lines.push({ d: `M${px + W} ${y0 + H / 2} L${px + W + SPOUSE_GAP} ${y0 + H / 2}`, kind: "spouse" });
-        rings.push({ x: px + W + SPOUSE_GAP / 2, y: y0 + H / 2 });
+        lines.push({ d: `M${px + W} ${y0 + H / 2} L${px + W + SPOUSE_GAP} ${y0 + H / 2}`, kind: "spouse", tint: home });
+        rings.push({ x: px + W + SPOUSE_GAP / 2, y: y0 + H / 2, tint: home });
       }
       const sx = view.parents.length === 2 ? px + W + SPOUSE_GAP / 2 : px + W / 2;
       const sy = view.parents.length === 2 ? y0 + H / 2 : y0 + H;
       const barY = y1 - V / 2;
       const first = mains[0].cx;
       const last = mains[mains.length - 1].cx;
-      lines.push({ d: `M${sx} ${sy} L${sx} ${barY}`, kind: "parent" });
-      lines.push({ d: `M${Math.min(sx, first)} ${barY} L${Math.max(sx, last)} ${barY}`, kind: "parent" });
-      mains.forEach((m) => lines.push({ d: `M${m.cx} ${barY} L${m.cx} ${y1}`, kind: "parent" }));
+      lines.push({ d: `M${sx} ${sy} L${sx} ${barY}`, kind: "parent", tint: home });
+      lines.push({ d: `M${Math.min(sx, first)} ${barY} L${Math.max(sx, last)} ${barY}`, kind: "parent", tint: home });
+      mains.forEach((m) => lines.push({ d: `M${m.cx} ${barY} L${m.cx} ${y1}`, kind: "parent", tint: home }));
       right = Math.max(right, px + pw + PAD);
     }
     const bottom = (hasKids ? y2 + H : y1 + H) + PAD;
