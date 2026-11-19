@@ -10,6 +10,7 @@ import { Rise } from "@/components/animations";
 import { Celebration, type Moment } from "@/components/Celebration";
 import { TreeLines, type Box } from "@/components/TreeLines";
 import { CircleTree } from "@/components/CircleTree";
+import { FamilyView } from "@/components/FamilyView";
 import { Body, Button, ErrorText, Loading } from "@/components/ui";
 
 export default function TreeScreen() {
@@ -22,7 +23,9 @@ export default function TreeScreen() {
   const [moment, setMoment] = useState<Moment | null>(null);
   const closeMoment = useCallback(() => setMoment(null), []);
   const lines = useCardBoxes(tree);
-  const [view, setView] = useState<"circle" | "rows">("circle");
+  const [view, setView] = useState<"family" | "circle" | "rows">("family");
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const [area, setArea] = useState({ w: 0, h: 0 });
 
   const journeyShown = useRef<string | null>(null);
@@ -42,7 +45,8 @@ export default function TreeScreen() {
       setTree(t);
       setWaiting(me.pending.length + me.votes.length + me.checks.length);
       // 24 "Journey Back in Time": opening the tree of an older relative.
-      if (t.root !== t.me && journeyShown.current !== t.root) {
+      // Not in the family view, where people move between relatives all the time.
+      if (viewRef.current !== "family" && t.root !== t.me && journeyShown.current !== t.root) {
         journeyShown.current = t.root;
         const placed = placeTree(t).rows.flatMap((r) => r.people);
         const mine = placed.find((p) => p.person.id === t.me);
@@ -122,7 +126,7 @@ export default function TreeScreen() {
       {header}
       <View style={{ flex: 1, backgroundColor: colors.night }}>
         <View style={styles.switch} accessibilityRole="tablist">
-          {(["circle", "rows"] as const).map((v) => (
+          {(["family", "circle", "rows"] as const).map((v) => (
             <Pressable
               key={v}
               accessibilityRole="tab"
@@ -130,12 +134,40 @@ export default function TreeScreen() {
               onPress={() => setView(v)}
               style={[styles.switchBtn, view === v && styles.switchOn]}
             >
-              <Text style={[styles.switchText, view === v && { color: colors.night }]}>{v === "circle" ? "Everyone around me" : "By generation"}</Text>
+              <Text style={[styles.switchText, view === v && { color: colors.night }]}>{v === "family" ? "Family" : v === "circle" ? "Everyone" : "Generations"}</Text>
             </Pressable>
           ))}
         </View>
         <ErrorText>{error}</ErrorText>
-        {view === "circle" ? (
+        {view === "family" ? (
+          <View style={{ flex: 1 }} onLayout={(e) => setArea({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+            <View style={styles.focusBar}>
+              <Text style={styles.focusText} numberOfLines={1}>
+                {tree.root === tree.me ? "Your family" : `${tree.people.find((p) => p.id === tree.root)?.full_name ?? ""}'s family`}
+              </Text>
+              {tree.root !== tree.me && (
+                <Pressable accessibilityRole="button" onPress={() => router.setParams({ root: tree.me })} style={styles.focusBtn}>
+                  <Text style={styles.focusBtnText}>Back to me</Text>
+                </Pressable>
+              )}
+            </View>
+            <Text style={styles.focusHint}>Tap anyone to see their family. Tap the gold card for details.</Text>
+            {area.w > 0 && (
+              <FamilyView
+                tree={tree}
+                width={area.w}
+                height={Math.max(0, area.h - 66)}
+                onFocus={(id) => router.setParams({ root: id })}
+                onOpen={open}
+              />
+            )}
+            {alone && (
+              <View style={styles.hint} pointerEvents="none">
+                <Body muted>Your tree starts with you. Tap your card to add your parents, children, brothers and sisters.</Body>
+              </View>
+            )}
+          </View>
+        ) : view === "circle" ? (
           <View style={{ flex: 1 }} onLayout={(e) => setArea({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
             {area.w > 0 && <CircleTree tree={tree} width={area.w} height={area.h} onOpen={open} />}
             {alone && (
@@ -269,6 +301,11 @@ const styles = StyleSheet.create({
   switchBtn: { minHeight: 40, paddingHorizontal: 14, borderRadius: 19, justifyContent: "center" },
   switchOn: { backgroundColor: colors.gold },
   switchText: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.text },
+  focusBar: { height: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, paddingHorizontal: 16 },
+  focusText: { flexShrink: 1, fontFamily: fonts.display, fontSize: 17, color: colors.goldSoft },
+  focusBtn: { minHeight: 36, paddingHorizontal: 12, borderRadius: 18, borderWidth: 1, borderColor: colors.gold, justifyContent: "center" },
+  focusHint: { height: 22, fontFamily: fonts.body, fontSize: 12, color: colors.muted, textAlign: "center", paddingHorizontal: 12 },
+  focusBtnText: { fontFamily: fonts.bodyMedium, fontSize: 14, color: colors.gold },
   hint: { position: "absolute", left: 20, right: 76, bottom: 24 },
   back: { position: "absolute", left: 16, bottom: 16 },
 });
