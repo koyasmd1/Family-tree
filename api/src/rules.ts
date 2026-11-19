@@ -664,6 +664,7 @@ export async function getTree(ctx: Ctx, actorId: string, rootId: string, depth =
       id: p.id,
       full_name: p.full_name,
       is_living: p.is_living,
+      added_at: p.created_at, // when they were added; the app colours families in this order
       has_account: members.has(id),
       ...(showDetails
         ? {
@@ -702,6 +703,7 @@ export async function getTree(ctx: Ctx, actorId: string, rootId: string, depth =
         id: p.id,
         full_name: p.full_name,
         is_living: p.is_living,
+        added_at: p.created_at,
         has_account: await hasAccount(ctx, end),
         ...(close ? { gender: p.gender, birth_year: p.birth_year, death_year: p.death_year, birthplace: p.birthplace, country: p.country, story: p.story } : {}),
         can_edit: await canManage(ctx, actorId, end),

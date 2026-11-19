@@ -25,3 +25,31 @@ export const fonts = {
   bodyMedium: "Inter_500Medium",
   bodyBold: "Inter_600SemiBold",
 };
+
+/**
+ * Household colours: each brother or sister, with their husband or wife and children,
+ * shares one of these soft colours. They are given out in the order the brothers and
+ * sisters were added (1st added = first colour), and repeat after 20.
+ */
+export const householdColours = [
+  "#7FB2E5", // sky blue
+  "#E8A27F", // coral
+  "#86CFA0", // mint
+  "#C9A2E0", // lavender
+  "#E5CF7A", // sand
+  "#74CFCF", // aqua
+  "#E895B2", // rose
+  "#A9C978", // leaf
+  "#9EA8EC", // periwinkle
+  "#E8B677", // apricot
+  "#9BD8BE", // seafoam
+  "#E0A3D4", // orchid
+  "#CFC29A", // khaki
+  "#86BEDD", // steel blue
+  "#DE9D9D", // dusty red
+  "#BFDD8A", // lime
+  "#B9B2E8", // soft violet
+  "#A3C7AE", // sage
+  "#E6C2A0", // peach
+  "#B5CBD9", // mist
+];

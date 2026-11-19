@@ -4,7 +4,7 @@ import Svg, { Circle, Path } from "react-native-svg";
 import type { Tree } from "@/lib/api";
 import { years } from "@/lib/family";
 import { familyView, type Member } from "@/lib/familyView";
-import { colors, fonts } from "@/lib/theme";
+import { colors, fonts, householdColours } from "@/lib/theme";
 import { native, useReducedMotion } from "./animations";
 
 const W = 138; // card width
@@ -21,6 +21,8 @@ interface Card {
   kind: Kind;
   x: number;
   y: number;
+  /** The household colour, for a brother's or sister's family. */
+  tint?: string;
 }
 
 /**
@@ -34,8 +36,8 @@ export function FamilyView({ tree, width, height, onFocus, onOpen }: { tree: Tre
   const plan = useMemo(() => {
     if (!view) return null;
     const cards: Card[] = [];
-    const lines: { d: string; kind: "parent" | "spouse" | "divorced" }[] = [];
-    const rings: { x: number; y: number }[] = [];
+    const lines: { d: string; kind: "parent" | "spouse" | "divorced"; tint?: string }[] = [];
+    const rings: { x: number; y: number; tint?: string }[] = [];
     const hasParents = view.parents.length > 0;
     const y0 = PAD;
     const y1 = hasParents ? y0 + H + V : PAD;
@@ -50,13 +52,14 @@ export function FamilyView({ tree, width, height, onFocus, onOpen }: { tree: Tre
       const bottom = u.children.length ? u.children.length * W + (u.children.length - 1) * GAP : 0;
       const unitW = Math.max(top, bottom);
       const topX = x + (unitW - top) / 2;
-      cards.push({ m: u.main, kind: u.isFocus ? "focus" : "sibling", x: topX, y: y1 });
+      const tint = householdColours[u.colour % householdColours.length];
+      cards.push({ m: u.main, kind: u.isFocus ? "focus" : "sibling", x: topX, y: y1, tint });
       mains.push({ cx: topX + W / 2 });
       u.spouses.forEach((s, i) => {
         const sx = topX + (i + 1) * (W + SPOUSE_GAP);
-        cards.push({ m: s, kind: u.isFocus ? "focusSpouse" : "spouse", x: sx, y: y1 });
-        lines.push({ d: `M${sx - SPOUSE_GAP} ${y1 + H / 2} L${sx} ${y1 + H / 2}`, kind: s.divorced ? "divorced" : "spouse" });
-        if (!s.divorced) rings.push({ x: sx - SPOUSE_GAP / 2, y: y1 + H / 2 });
+        cards.push({ m: s, kind: u.isFocus ? "focusSpouse" : "spouse", x: sx, y: y1, tint });
+        lines.push({ d: `M${sx - SPOUSE_GAP} ${y1 + H / 2} L${sx} ${y1 + H / 2}`, kind: s.divorced ? "divorced" : "spouse", tint });
+        if (!s.divorced) rings.push({ x: sx - SPOUSE_GAP / 2, y: y1 + H / 2, tint });
       });
       if (u.children.length) {
         // The children's line starts between the parents (or under a single parent).
@@ -65,11 +68,11 @@ export function FamilyView({ tree, width, height, onFocus, onOpen }: { tree: Tre
         const barY = y2 - V / 2;
         const kidX = x + (unitW - bottom) / 2;
         const centres = u.children.map((_, i) => kidX + i * (W + GAP) + W / 2);
-        lines.push({ d: `M${sx} ${sy} L${sx} ${barY}`, kind: "parent" });
-        lines.push({ d: `M${Math.min(sx, centres[0])} ${barY} L${Math.max(sx, centres[centres.length - 1])} ${barY}`, kind: "parent" });
+        lines.push({ d: `M${sx} ${sy} L${sx} ${barY}`, kind: "parent", tint });
+        lines.push({ d: `M${Math.min(sx, centres[0])} ${barY} L${Math.max(sx, centres[centres.length - 1])} ${barY}`, kind: "parent", tint });
         u.children.forEach((c, i) => {
-          cards.push({ m: c, kind: "child", x: kidX + i * (W + GAP), y: y2 });
-          lines.push({ d: `M${centres[i]} ${barY} L${centres[i]} ${y2}`, kind: "parent" });
+          cards.push({ m: c, kind: "child", x: kidX + i * (W + GAP), y: y2, tint });
+          lines.push({ d: `M${centres[i]} ${barY} L${centres[i]} ${y2}`, kind: "parent", tint });
         });
       }
       x += unitW + UNIT_GAP;
@@ -143,15 +146,15 @@ export function FamilyView({ tree, width, height, onFocus, onOpen }: { tree: Tre
               <Path
                 key={i}
                 d={l.d}
-                stroke={l.kind === "spouse" ? colors.goldSoft : l.kind === "divorced" ? colors.muted : colors.gold}
-                strokeWidth={l.kind === "spouse" ? 2.5 : 1.8}
+                stroke={l.kind === "divorced" ? colors.muted : l.tint ?? (l.kind === "spouse" ? colors.goldSoft : colors.gold)}
+                strokeWidth={l.kind === "spouse" ? 2.5 : l.tint ? 2.2 : 1.8}
                 strokeDasharray={l.kind === "divorced" ? [6, 6] : undefined}
                 opacity={l.kind === "parent" ? 0.75 : 1}
                 fill="none"
               />
             ))}
             {plan.rings.map((r, i) => (
-              <Circle key={i} cx={r.x} cy={r.y} r={6} stroke={colors.goldSoft} strokeWidth={2} fill={colors.night} />
+              <Circle key={i} cx={r.x} cy={r.y} r={6} stroke={r.tint ?? colors.goldSoft} strokeWidth={2} fill={colors.night} />
             ))}
           </Svg>
           {plan.cards.map((c) => (
@@ -167,16 +170,27 @@ export function FamilyView({ tree, width, height, onFocus, onOpen }: { tree: Tre
   );
 }
 
+/** Mixes a household colour into the dark card colour, so the tint stays soft. */
+function soften(hex: string, amount: number) {
+  const n = (h: string, i: number) => parseInt(h.slice(i, i + 2), 16);
+  const base = colors.card;
+  const mix = (i: number) => Math.round(n(base, i) * (1 - amount) + n(hex, i) * amount);
+  return `rgb(${mix(1)}, ${mix(3)}, ${mix(5)})`;
+}
+
 function FamilyCard({ card, onPress }: { card: Card; onPress: () => void }) {
-  const { m, kind } = card;
+  const { m, kind, tint } = card;
   const p = m.person;
   const passed = p.is_living === 0;
   const focus = kind === "focus";
   const spouse = kind === "spouse" || kind === "focusSpouse";
-  const yrs = years(p);
+  const yrs = passed ? `${p.birth_year ?? "?"}–${p.death_year ?? "?"}` : years(p);
   const a11y = [m.label, p.full_name, yrs, passed ? "passed away" : "", m.pending ? "awaiting approval" : "", focus ? "open profile" : "show their family"]
     .filter(Boolean)
     .join(", ");
+  // Relatives who passed away: the same card, gently greyed, with "In memory" and their years.
+  // The household colour stays as a thin stripe so you can still see which family they belong to.
+  const background = passed ? colors.lantern : tint ? soften(tint, focus ? 0.12 : 0.18) : undefined;
   return (
     <Pressable
       accessibilityRole="button"
@@ -185,23 +199,34 @@ function FamilyCard({ card, onPress }: { card: Card; onPress: () => void }) {
       style={[
         styles.card,
         { left: card.x, top: card.y },
-        spouse && styles.spouse,
-        kind === "focusSpouse" && styles.focusSpouse,
+        spouse && !tint && styles.spouse,
+        tint && { borderColor: tint, backgroundColor: background },
+        spouse && tint && { borderStyle: "solid", borderWidth: 1 },
         passed && styles.passed,
+        passed && tint && { borderLeftColor: tint, borderLeftWidth: 4 },
         m.pending && styles.pending,
         focus && styles.focus,
+        focus && background && { backgroundColor: background },
         focus && (Platform.OS === "web" ? ({ boxShadow: `0 0 22px ${colors.gold}` } as object) : styles.focusShadow),
       ]}
     >
-      <Text style={[styles.label, spouse && { color: colors.goldSoft }, focus && { color: colors.gold }]} numberOfLines={1}>
+      <Text style={[styles.label, tint && !passed && { color: tint }, focus && { color: colors.gold }]} numberOfLines={1}>
         {spouse ? "♥ " : ""}
-        {focus && m.label === "You" ? "You" : m.label}
+        {m.label}
       </Text>
-      <Text style={[styles.name, focus && { color: colors.goldSoft }, passed && { color: "#C9CFEA" }]} numberOfLines={2}>
-        {passed ? "☾ " : ""}
+      <Text style={[styles.name, focus && { color: colors.goldSoft }, passed && styles.passedName]} numberOfLines={passed ? 1 : 2}>
         {p.full_name}
       </Text>
-      {m.pending ? <Text style={styles.waiting}>Awaiting approval</Text> : !!yrs && <Text style={styles.meta} numberOfLines={1}>{yrs}</Text>}
+      {m.pending ? (
+        <Text style={styles.waiting}>Awaiting approval</Text>
+      ) : passed ? (
+        <>
+          <Text style={styles.memory}>In memory</Text>
+          <Text style={styles.meta} numberOfLines={1}>{yrs}</Text>
+        </>
+      ) : (
+        !!yrs && <Text style={styles.meta} numberOfLines={1}>{yrs}</Text>
+      )}
     </Pressable>
   );
 }
@@ -222,7 +247,9 @@ const styles = StyleSheet.create({
   // Husbands and wives: a warm rose-gold card, so they stand apart from brothers and sisters.
   spouse: { backgroundColor: "#2A1E36", borderColor: "#B98AA8", borderWidth: 1.5 },
   focusSpouse: { borderColor: colors.goldSoft, borderWidth: 2 },
-  passed: { backgroundColor: colors.lantern, borderColor: colors.lanternBorder },
+  passed: { backgroundColor: "#151A2E", borderColor: "#4A5070", borderWidth: 1 },
+  passedName: { color: "#AEB3C8" },
+  memory: { fontFamily: fonts.body, fontSize: 11, color: "#8E94AE", fontStyle: "italic" },
   pending: { borderStyle: "dashed", borderColor: colors.pending, borderWidth: 2 },
   focus: { backgroundColor: colors.meCard, borderColor: colors.gold, borderWidth: 2.5 },
   focusShadow: { shadowColor: colors.gold, shadowOpacity: 0.8, shadowRadius: 14, elevation: 8 },
