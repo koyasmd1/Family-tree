@@ -1,7 +1,8 @@
 import { useCallback, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { api, type PendingRelation, type Vote } from "@/lib/api";
+import { api, type JoinRequest, type PendingRelation, type Vote } from "@/lib/api";
+import { checkQuestion } from "@/lib/family";
 import { useAuth } from "@/lib/auth";
 import { colors, fonts } from "@/lib/theme";
 import { Body, Button, Card, ErrorText, Kicker, Loading, Screen, Title } from "@/components/ui";
@@ -20,7 +21,7 @@ export default function Inbox() {
   );
   const [notice, setNotice] = useState("");
   const closeMoment = useCallback(() => setMoment(null), []);
-  const [data, setData] = useState<{ me: string; pending: PendingRelation[]; votes: Vote[] } | null>(null);
+  const [data, setData] = useState<{ me: string; pending: PendingRelation[]; votes: Vote[]; checks: JoinRequest[] } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -29,7 +30,7 @@ export default function Inbox() {
     if (!token) return router.replace("/welcome");
     try {
       const me = await api(token).me();
-      setData({ me: me.person.id, pending: me.pending, votes: me.votes });
+      setData({ me: me.person.id, pending: me.pending, votes: me.votes, checks: me.checks });
     } catch (e) {
       setError((e as Error).message);
     }
@@ -41,13 +42,13 @@ export default function Inbox() {
     }, [load]),
   );
 
-  async function act(key: string, fn: () => Promise<unknown>, after?: () => void) {
+  async function act<T>(key: string, fn: () => Promise<T>, after?: (result: T) => void) {
     setBusy(key);
     setError("");
     setNotice("");
     try {
-      await fn();
-      after?.();
+      const result = await fn();
+      after?.(result);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -58,7 +59,7 @@ export default function Inbox() {
 
   if (!data) return error ? <Screen><ErrorText>{error}</ErrorText></Screen> : <Loading />;
 
-  const empty = data.pending.length === 0 && data.votes.length === 0;
+  const empty = data.pending.length === 0 && data.votes.length === 0 && data.checks.length === 0;
   return (
     <Screen>
       <Kicker>WAITING FOR YOU</Kicker>
@@ -66,6 +67,47 @@ export default function Inbox() {
       <ErrorText>{error}</ErrorText>
       {!!notice && <Text style={styles.notice}>{notice}</Text>}
       {empty && <Body muted>Nothing is waiting for you right now.</Body>}
+
+      {data.checks.map((r) => (
+        <Card key={r.id}>
+          <Text style={styles.head}>{checkQuestion(r)}</Text>
+          <Body muted>
+            They signed up and asked to join the tree. Only say yes if you know it's really them. Once confirmed, they
+            can add their own family.
+          </Body>
+          <View style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <Button
+                title="Yes, it's them"
+                busy={busy === r.id + "y"}
+                onPress={() =>
+                  act(
+                    r.id + "y",
+                    () => api(token).answerRequest(r.id, true),
+                    (result) => {
+                      if (result.status !== "approved") {
+                        setNotice(`Thank you. One more relative needs to confirm ${r.requester_name}.`);
+                        return;
+                      }
+                      const text = `Thank you. ${r.requester_name} is now part of the family tree.`;
+                      setNotice(text);
+                      setMoment({ kind: "kinship", title: "Welcome to the family", body: text });
+                    },
+                  )
+                }
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button
+                kind="secondary"
+                title="No"
+                busy={busy === r.id + "n"}
+                onPress={() => act(r.id + "n", () => api(token).answerRequest(r.id, false), () => setNotice("Thank you. The request was refused."))}
+              />
+            </View>
+          </View>
+        </Card>
+      ))}
 
       {data.pending.map((r) => {
         const otherName = r.a_id === data.me ? r.b_name : r.a_name;

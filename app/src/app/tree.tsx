@@ -29,9 +29,15 @@ export default function TreeScreen() {
     setError("");
     try {
       const client = api(token);
-      const [t, me] = await Promise.all([client.tree(root, 3), client.me()]);
+      const me = await client.me();
+      // Someone who signed up is not part of the tree until a relative confirms them.
+      if (me.person.in_tree === 0) {
+        router.replace("/find");
+        return;
+      }
+      const t = await client.tree(root, 3);
       setTree(t);
-      setWaiting(me.pending.length + me.votes.length);
+      setWaiting(me.pending.length + me.votes.length + me.checks.length);
       // 24 "Journey Back in Time": opening the tree of an older relative.
       if (t.root !== t.me && journeyShown.current !== t.root) {
         journeyShown.current = t.root;

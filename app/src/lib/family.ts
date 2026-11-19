@@ -1,4 +1,4 @@
-import type { Relation, Tree, TreePerson } from "./api";
+import type { JoinRequest, Relation, Tree, TreePerson } from "./api";
 
 export interface Placed {
   person: TreePerson;
@@ -187,4 +187,25 @@ export function relationPath(tree: Tree, fromId: string, toId: string): PathStep
     }
     return { id, name: p.full_name, relation: `${owner} ${word}` };
   });
+}
+
+/** How the relative in a "link" request is related to the newcomer who sent it. */
+export function requestRelationWord(r: JoinRequest): string {
+  const rel = r.relation;
+  if (!rel) return "relative";
+  if (rel.type === "parent") return rel.a_id === r.target_id ? "parent" : "child";
+  if (rel.type === "sibling") return "brother or sister";
+  return "husband or wife";
+}
+
+/** The question a relative is asked about a newcomer. */
+export function checkQuestion(r: JoinRequest): string {
+  const who = r.requester_login ? `${r.requester_name} (${r.requester_login})` : r.requester_name;
+  if (r.kind === "claim") return `${who} says they are ${r.target_name} in your family. Is this really them?`;
+  return `${who} says ${r.target_name} is their ${requestRelationWord(r)}. Is that right?`;
+}
+
+/** A newcomer's own request, in their words. */
+export function myRequestText(r: JoinRequest): string {
+  return r.kind === "claim" ? `You said you are ${r.target_name}.` : `You said ${r.target_name} is your ${requestRelationWord(r)}.`;
 }

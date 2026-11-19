@@ -11,12 +11,12 @@ This repository has two parts:
 
 ## The rules (as agreed)
 
-1. **One single global tree.** Nobody can sign up directly. A member adds a relative and shares an invite link; the relative joins through it, then adds their own family.
+1. **One single global tree.** Anyone can sign up, then find themselves ("This is me") or a relative ("This is my relative") in the tree. They become part of the tree only when a relative who has already joined confirms it: one close relative (up to 2 steps away, or whoever added their profile) is enough; if none has joined, 2 of the 4 nearest relatives must say yes. Relatives see part of the newcomer's phone number or email to recognise them. A newcomer can have 3 requests waiting and send 5 a day. Members can still add a relative and share an invite link, which is the quickest way in.
 2. **Parents and children** are linked straight away, without approval. This also covers relatives who passed away and babies.
 3. **Siblings and spouses** must be approved by the other person. Sibling links that appear when a new child joins parents who already have children also need approval.
-4. **Removing a wrong link:** 4 relatives are picked at random, closest first (then further out). 3 must agree. The two people in the link can never vote. A voter who has not answered in 7 days is replaced by another random relative. A vote removes only that one link.
+4. **Removing a wrong link:** anyone in the tree who sees a wrong link can object. 4 relatives are picked at random, closest first (then further out). 3 must agree. The two people in the link can never vote. A voter who has not answered in 7 days is replaced by another random relative. A vote removes only that one link.
 5. **Passed away** relatives are shown as soft "lantern" cards; **divorced** couples are marked as divorced while their children stay linked to both parents.
-6. **Privacy:** a living person's details (birth year, places, story) are shown only to close relatives (2 steps away) or whoever looks after a profile that has no account. Search only finds people connected to you.
+6. **Privacy:** a living person's details (birth year, places, story) are shown only to close relatives (2 steps away) or whoever looks after a profile that has no account. Search only finds people connected to you; a newcomer's search shows just names, birth years and parents' names.
 7. **No photos** in this first version, to stay on the free plan.
 
 ## Try it on your computer
@@ -49,25 +49,22 @@ If a phone or computer is set to reduce motion, every animation shows a still pi
 
 ## Going live
 
-### Server (free)
-1. Create a free Cloudflare account, then in `api/`: `npx wrangler login`.
-2. `npx wrangler d1 create onefamily` and paste the `database_id` it prints into `api/wrangler.toml`.
-3. `npm run db:migrate:remote`
-4. `npx wrangler secret put SETUP_TOKEN` (any long secret, used once to create the first person).
-5. `npm run deploy`. Wrangler prints the server address, e.g. `https://onefamily-api.<you>.workers.dev`.
-6. Create the first person with the `curl` command above, using the live address.
+Every change merged into `main` is put online automatically by `.github/workflows/deploy.yml`
+(it runs `scripts/deploy.sh`). It creates the database, server and website on Cloudflare's free plan the
+first time, and updates them after that.
 
-### Website (free)
-In `app/`, build with the live addresses, then upload to Cloudflare Pages:
+It needs three GitHub secrets (Settings › Secrets and variables › Actions):
 
-```bash
-EXPO_PUBLIC_API_URL=https://onefamily-api.<you>.workers.dev \
-EXPO_PUBLIC_WEB_URL=https://onefamily.pages.dev \
-npm run build:web
-npx wrangler pages deploy dist --project-name onefamily
-```
+| Secret | What it is |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | A Cloudflare API token with Account permissions: Workers Scripts Edit, D1 Edit, Cloudflare Pages Edit |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID (the long code in the dashboard address) |
+| `SETUP_TOKEN` | Any long secret. You type it once on `/start` to create the first person |
 
-Then set `ALLOWED_ORIGIN` in `api/wrangler.toml` to the website address and deploy the server again.
+The first time, open `<website>/start` and create the first person. After that the page stops working.
+
+To use your own domain, add it to the `onefamily` Pages project in Cloudflare (Custom domains), then add a
+GitHub **variable** `WEB_DOMAIN` (for example `onefamilytree.com`) and run the workflow again.
 
 ### Phone apps
 The same `app/` code builds the iPhone and Android apps with Expo's build service (`npx eas-cli build`).

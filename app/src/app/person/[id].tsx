@@ -117,7 +117,7 @@ export default function PersonScreen() {
     setNotice("");
     try {
       await api(token).startRemovalVote(r.id);
-      setNotice("Vote started. 4 relatives were picked at random; the link is removed if 3 agree.");
+      setNotice("Objection raised. 4 relatives were picked at random to vote; the link is removed if 3 agree.");
     } catch (e) {
       setError((e as Error).message);
     }
@@ -187,7 +187,7 @@ export default function PersonScreen() {
       {person.can_edit && !isMe && !person.has_account && person.is_living === 1 && (
         <Card>
           <Text style={styles.cardTitle}>Invite {person.full_name} to join</Text>
-          <Body muted>Joining is by invitation only. Create a link and send it yourself by WhatsApp, SMS or email. It's free.</Body>
+          <Body muted>An invite link is the quickest way in: they join without waiting for anyone to confirm them. Send it yourself by WhatsApp, SMS or email. It's free.</Body>
           {link ? (
             <>
               <Text selectable style={styles.link}>{link}</Text>
@@ -232,7 +232,7 @@ export default function PersonScreen() {
                   <Text style={styles.smallBtnText}>{r.divorced ? "Undo divorce" : "Mark divorced"}</Text>
                 </Pressable>
               )}
-              {r.status === "active" && (involved || person.can_edit) && (
+              {r.status === "active" && (
                 <Pressable accessibilityRole="button" onPress={() => removeLink(r)} style={styles.smallBtn}>
                   <Text style={[styles.smallBtnText, { color: colors.danger }]}>Wrong link?</Text>
                 </Pressable>
