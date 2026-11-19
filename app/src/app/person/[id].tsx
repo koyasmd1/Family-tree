@@ -340,7 +340,6 @@ function AddRelative({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const needsApproval = kind === "sibling" || kind === "spouse";
 
   async function search(q: string) {
     setQuery(q);
@@ -373,8 +372,7 @@ function AddRelative({
             }),
         ...(kind === "child" && otherParent !== "none" ? { otherParentId: otherParent } : {}),
       });
-      const waiting = result.relations.some((r) => r.status === "pending");
-      await onDone(waiting ? "Added. This link shows as awaiting approval until they confirm it." : "Added to the tree.", {
+      await onDone("Added to the tree.", {
         kind,
         name: result.person.full_name,
         living: result.person.is_living === 1,
@@ -391,9 +389,7 @@ function AddRelative({
       <Text style={styles.cardTitle}>Add a relative of {person.full_name}</Text>
       <Choice label="Relation" options={KINDS} value={kind} onChange={setKind} />
       <Body muted>
-        {needsApproval
-          ? "Brothers, sisters, husbands and wives must approve the link before it is confirmed."
-          : "Parents and children are linked straight away."}
+        Anyone you add is linked straight away. If they join later, they tap "Find me" and you approve it.
       </Body>
       <Choice
         label="Who?"

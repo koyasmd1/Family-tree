@@ -38,7 +38,7 @@ export default function Welcome() {
         <Title>Everyone on earth, one family tree.</Title>
       </NorthernGlow>
       <Body muted>
-        Join the tree, find yourself or a relative, and a family member who has already joined confirms it's you.
+        New here? Sign up and use "Find me": search for your name, and the relative who added you approves it.
         Already a member? Sign in below.
       </Body>
       <Card>
@@ -47,7 +47,7 @@ export default function Welcome() {
         <ErrorText>{error}</ErrorText>
         <Button title="Sign in" onPress={submit} busy={busy} disabled={!login || !password} />
       </Card>
-      <Button kind="secondary" title="New here? Join the tree" onPress={() => router.push("/join")} />
+      <Button kind="secondary" title="New here? Find me" onPress={() => router.push("/join")} />
     </Screen>
   );
 }

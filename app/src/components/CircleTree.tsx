@@ -194,7 +194,7 @@ function Person({ node, pos, zoom, isMe, isCentre, onPress }: { node: RadialNode
         ]}
       >
         <Text style={{ fontFamily: fonts.displayBold, fontSize: Math.max(10, d * 0.34), color: isMe ? colors.goldSoft : passed ? colors.muted : colors.text }}>
-          {passed ? "☾" : initials(p.full_name)}
+          {initials(p.full_name)}
         </Text>
       </View>
       <View style={styles.tag}>
@@ -202,7 +202,7 @@ function Person({ node, pos, zoom, isMe, isCentre, onPress }: { node: RadialNode
         {p.full_name}
       </Text>
       <Text numberOfLines={1} style={{ fontFamily: fonts.body, fontSize: metaSize, color: node.pending ? colors.amber : colors.muted, textAlign: "center" }}>
-        {node.pending ? "Awaiting approval" : node.label}
+        {node.pending ? "Awaiting approval" : passed ? `${node.label} · in memory` : node.label}
       </Text>
       </View>
     </Pressable>

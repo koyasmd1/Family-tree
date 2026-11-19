@@ -35,7 +35,7 @@ export default function RootLayout() {
           <Stack.Screen name="inbox" options={{ title: "Requests and votes" }} />
           <Stack.Screen name="start" options={{ title: "Start the tree" }} />
           <Stack.Screen name="join" options={{ title: "Join the tree" }} />
-          <Stack.Screen name="find" options={{ title: "Find your family", headerBackVisible: false }} />
+          <Stack.Screen name="find" options={{ title: "Find me", headerBackVisible: false }} />
         </Stack>
       </AuthProvider>
     </SafeAreaProvider>

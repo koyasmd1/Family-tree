@@ -58,13 +58,16 @@ export function PersonCard({ person, label, isMe, pending, onPress, onLayout, an
           ]}
         >
           <View style={styles.nameRow}>
-            {passed && <Text style={styles.moon} accessibilityElementsHidden>☾</Text>}
             <Text style={[styles.name, isMe && { color: colors.goldSoft }, passed && { color: "#C9CFEA" }]} numberOfLines={2}>
               {person.full_name}
             </Text>
           </View>
           <Text style={styles.meta} numberOfLines={1}>{label}</Text>
-          {!!years(person) && <Text style={styles.meta}>{years(person)}</Text>}
+          {passed ? (
+            <Text style={[styles.meta, { fontStyle: "italic" }]}>In memory · {person.birth_year ?? "?"} – {person.death_year ?? "?"}</Text>
+          ) : (
+            !!years(person) && <Text style={styles.meta}>{years(person)}</Text>
+          )}
           {pending && <Text style={styles.pendingText}>Awaiting approval</Text>}
           {!person.has_account && person.is_living === 1 && !pending && <Text style={styles.invite}>Not joined yet</Text>}
         </View>

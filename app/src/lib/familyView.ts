@@ -20,6 +20,8 @@ export interface Unit {
   spouses: Member[];
   children: Member[];
   isFocus: boolean;
+  /** Which household colour this family gets (0-19). Unmarried brothers and sisters share one; each married one gets their own, in added order. */
+  colour: number;
 }
 
 export interface FamilyView {
@@ -27,6 +29,8 @@ export interface FamilyView {
   parents: Member[];
   units: Unit[];
 }
+
+export const HOUSEHOLD_COLOURS = 20;
 
 const live = (r: Relation) => r.status === "active" || r.status === "pending";
 
@@ -99,6 +103,7 @@ export function familyView(tree: Tree): FamilyView | null {
         return member(c, parent ? { label: `${word(g, "Son", "Daughter", "Child")} of ${first(byId.get(parent.id)!.full_name)}` } : {});
       }),
       isFocus: id === focus.id,
+      colour: 0,
     };
   };
 
@@ -106,6 +111,17 @@ export function familyView(tree: Tree): FamilyView | null {
   // Work out the focus person's own family first, so their husband or wife and children stay with them.
   const mine = unitFor(focus.id);
   const units = row.map((id) => (id === focus.id ? mine : unitFor(id)));
+
+  // Brothers and sisters who are not married yet all share their parents' colour.
+  // Once someone's husband or wife is added, that new household gets its own colour,
+  // in the order they were added: the first one added gets the next colour, and so on.
+  const added = (a: Unit, b: Unit) =>
+    (a.main.person.added_at ?? "").localeCompare(b.main.person.added_at ?? "") || byBirth(a.main.person.id, b.main.person.id);
+  const single = units.filter((u) => u.spouses.length === 0);
+  const married = units.filter((u) => u.spouses.length > 0).sort(added);
+  // Colour 0 is the parents' own family; married households take 1, 2, 3...
+  single.forEach((u) => (u.colour = 0));
+  married.forEach((u, i) => (u.colour = (1 + i) % HOUSEHOLD_COLOURS));
 
   // The focus person is labelled by how they are related to you, e.g. "Wife" or "Sister".
   if (focus.id !== tree.me && byId.has(tree.me)) {

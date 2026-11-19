@@ -40,8 +40,8 @@ export default function Join() {
       <Kicker>JOIN ONE FAMILY</Kicker>
       <Title>Join the tree</Title>
       <Body muted>
-        After signing up, you'll find yourself or a relative in the tree. A relative who has already joined then
-        confirms it's really you.
+        After signing up, use "Find me" to search for your name. The relative who added you approves it, and then
+        you're part of the tree.
       </Body>
       <Card>
         <Field label="Your full name" value={name} onChangeText={setName} autoComplete="name" />

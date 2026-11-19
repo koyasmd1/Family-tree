@@ -13,6 +13,8 @@ export interface TreePerson {
   is_living: number;
   has_account: boolean;
   can_edit: boolean;
+  /** When this person was added to the tree. */
+  added_at?: string;
   /** 0 while a newcomer waits for a relative to confirm them. */
   in_tree?: number;
   gender?: string | null;

@@ -16,7 +16,7 @@ const KINDS: { value: RelativeKind; label: string }[] = [
 ];
 
 const STATUS: Record<string, string> = {
-  open: "Waiting for a relative to confirm",
+  open: "Waiting for approval",
   approved: "Confirmed",
   rejected: "Not confirmed",
 };
@@ -91,10 +91,11 @@ export default function FindYourFamily() {
   return (
     <Screen>
       <Kicker>WELCOME, {me.person.full_name.toUpperCase()}</Kicker>
-      <Title>Find your family</Title>
+      <Title>Find me</Title>
       <Body muted>
-        Search for your own name. A relative may already have added you. If you're not there, search for a parent,
-        child, brother, sister, husband or wife who is. A relative who has joined will confirm it's really you.
+        Search for your own name. A relative may already have added you: tap "This is me", and the person who added
+        you approves it. Then you're part of the tree and can add your own family. If you're not there yet, search for
+        a parent, child, brother, sister, husband or wife who is.
       </Body>
 
       {!!notice && <Text style={styles.notice} accessibilityLiveRegion="polite">{notice}</Text>}
@@ -151,7 +152,7 @@ export default function FindYourFamily() {
                       onPress={() =>
                         act(p.id + "claim", async () => {
                           await api(token).claim(p.id);
-                          return `Sent. A relative will confirm that you are ${p.full_name}.`;
+                          return `Sent. The person who added ${p.full_name} will approve it.`;
                         })
                       }
                     >

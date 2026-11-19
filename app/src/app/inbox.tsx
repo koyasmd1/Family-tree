@@ -72,8 +72,10 @@ export default function Inbox() {
         <Card key={r.id}>
           <Text style={styles.head}>{checkQuestion(r)}</Text>
           <Body muted>
-            They signed up and asked to join the tree. Only say yes if you know it's really them. Once confirmed, they
-            can add their own family.
+            {r.kind === "claim"
+              ? `They signed up and tapped "Find me" on a profile you added. Only say yes if you know it's really them.`
+              : "They signed up and asked to connect to your family. Only say yes if you know it's really them."}{" "}
+            Once you approve, they are part of the tree and can add their own family.
           </Body>
           <View style={styles.row}>
             <View style={{ flex: 1 }}>

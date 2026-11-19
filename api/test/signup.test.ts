@@ -8,10 +8,11 @@ import { testDb } from "./d1";
 const SETUP = "test-setup-secret";
 let clock: Date;
 let app: ReturnType<typeof createApp>;
+let db: ReturnType<typeof testDb>;
 
 beforeEach(() => {
   clock = new Date("2026-11-14T10:00:00Z");
-  const db = testDb();
+  db = testDb();
   app = createApp(() => ({ db, now: () => clock, random: () => 0 }));
 });
 
@@ -112,18 +113,24 @@ describe('"This is me": claiming a profile', () => {
     expect(login.json.personId).toBe(zain.person.id);
   });
 
-  it("asks the person who added the profile, even while their own link is still pending", async () => {
+  it("Find me: only the person who added the profile is asked, and one yes is enough", async () => {
     const k = await starter();
+    const f = await add(k.token, k.id, "parent", { full_name: "Father" });
+    await invite(k.token, f.person.id); // Father is a member too, but he did not add Sara
     const sara = await add(k.token, k.id, "sibling", { full_name: "Sara" });
-    expect(sara.relations[0].status).toBe("pending");
     const s = await signUp("Sara");
     const req = await call("POST", "/claims", { token: s.token, body: { person_id: sara.person.id } });
     expect(req.status, JSON.stringify(req.json)).toBe(201);
-    await call("POST", `/join-requests/${req.json.id}/answer`, { token: k.token, body: { yes: true } });
-    // Sara can now approve being Koyas's sister.
+    expect(req.json.checkers).toBe(1);
+    const done = await call("POST", `/join-requests/${req.json.id}/answer`, { token: k.token, body: { yes: true } });
+    expect(done.json.status).toBe("approved");
     const m = await me(s.token);
     expect(m.person.id).toBe(sara.person.id);
-    expect(m.pending).toHaveLength(1);
+    expect(m.person.in_tree).toBe(1);
+    expect(m.pending).toHaveLength(0);
+    // Now Sara is part of the tree and can add her own family.
+    const kid = await call("POST", "/relatives", { token: s.token, body: { of: sara.person.id, kind: "child", person: { full_name: "Sara's son" } } });
+    expect(kid.status).toBe(201);
   });
 
   it("is refused when a close relative says no", async () => {
@@ -136,7 +143,7 @@ describe('"This is me": claiming a profile', () => {
     expect((await me(s.token)).person.in_tree).toBe(0);
   });
 
-  it("needs 2 yes answers from relatives further out when no close relative has joined", async () => {
+  it("needs 2 yes answers from relatives further out when the person who added the profile has passed away", async () => {
     const k = await starter();
     // Father -> Koyas -> Kid (passed away) -> Grandkid (passed away) -> Great-grandkid, the profile being claimed.
     const f = await add(k.token, k.id, "parent", { full_name: "Father" });
@@ -144,6 +151,8 @@ describe('"This is me": claiming a profile', () => {
     const gk = await add(k.token, kid.person.id, "child", { full_name: "Grandkid", is_living: false });
     const great = await add(k.token, gk.person.id, "child", { full_name: "Great-grandkid" });
     const fToken = await invite(k.token, f.person.id);
+    // Whoever added the profile is no longer here to answer.
+    await db.prepare("UPDATE people SET created_by = NULL WHERE id = ?").bind(great.person.id).run();
     const s = await signUp("Great-grandkid");
     const req = (await call("POST", "/claims", { token: s.token, body: { person_id: great.person.id } })).json;
     expect(req.close).toBe(false);
