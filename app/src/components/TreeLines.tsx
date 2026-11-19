@@ -1,7 +1,7 @@
 // The lines that join people in the tree:
-// - 08 Root Rivers: light flows down every parent and child line
+// - 08 Root Rivers: light flows down every parent and child line (only when `lively`)
 // - 16 Marriage Bridge: a golden arch with a ring joins husband and wife
-// - 02 Heartbeat Link: a pulse of light beats along every approved marriage
+// - 02 Heartbeat Link: a pulse of light beats along every approved marriage (only when `lively`)
 // Lines still waiting for approval are amber and dashed; divorced couples get a grey dashed arch.
 import { StyleSheet, View } from "react-native";
 import Svg, { G, Path } from "react-native-svg";
@@ -82,10 +82,15 @@ export function buildLines(relations: Relation[], boxes: Map<string, Box>): Line
   return lines;
 }
 
-export function TreeLines({ relations, boxes, width, height }: { relations: Relation[]; boxes: Map<string, Box>; width: number; height: number }) {
-  const flow = useTimeline(1400, { easing: EASE.linear, still: 0 });
+/**
+ * `lively` keeps light flowing and hearts beating along the lines. It is used on the
+ * /animations page; in the real tree the lines are drawn once and then stay still,
+ * because many looping lines keep a phone busy and make the app slow.
+ */
+export function TreeLines({ relations, boxes, width, height, lively = false }: { relations: Relation[]; boxes: Map<string, Box>; width: number; height: number; lively?: boolean }) {
+  const flow = useTimeline(1400, { easing: EASE.linear, still: 0, loop: lively });
   const draw = useTimeline(1100, { loop: false, delay: 500 });
-  const beat = useTimeline(2600, { easing: EASE.inOut, delay: 1600, still: 0 });
+  const beat = useTimeline(2600, { easing: EASE.inOut, delay: 1600, still: 0, loop: lively });
   if (!width || !height || boxes.size === 0) return null;
   const lines = buildLines(relations, boxes);
   const flowOffset = flow.interpolate({ inputRange: [0, 1], outputRange: [0, -18] });
@@ -98,7 +103,7 @@ export function TreeLines({ relations, boxes, width, height }: { relations: Rela
             return (
               <G key={l.key}>
                 <Path d={l.d} stroke={l.pending ? colors.pending : colors.line} strokeWidth={2} strokeDasharray={l.pending ? [6, 6] : undefined} strokeLinecap="round" />
-                {!l.pending && <APath d={l.d} stroke={colors.gold} strokeWidth={2} strokeLinecap="round" strokeDasharray={[2, 16]} strokeDashoffset={flowOffset} opacity={0.8} />}
+                {lively && !l.pending && <APath d={l.d} stroke={colors.gold} strokeWidth={2} strokeLinecap="round" strokeDasharray={[2, 16]} strokeDashoffset={flowOffset} opacity={0.8} />}
               </G>
             );
           }
@@ -128,7 +133,7 @@ export function TreeLines({ relations, boxes, width, height }: { relations: Rela
                 strokeDasharray={[l.length, l.length]}
                 strokeDashoffset={draw.interpolate({ inputRange: [0, 1], outputRange: [l.length, 0] })}
               />
-              <APath
+              {lively && <APath
                 d={l.d}
                 stroke={colors.goldSoft}
                 strokeWidth={4}
@@ -136,7 +141,7 @@ export function TreeLines({ relations, boxes, width, height }: { relations: Rela
                 strokeDasharray={[10, l.length + 20]}
                 strokeDashoffset={beat.interpolate({ inputRange: [0, 1], outputRange: [10, -l.length] })}
                 opacity={beat.interpolate({ inputRange: [0, 0.05, 0.9, 1], outputRange: [0, 1, 1, 0] })}
-              />
+              />}
               <ACircle
                 cx={l.ring.x}
                 cy={l.ring.y}

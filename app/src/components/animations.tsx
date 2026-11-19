@@ -35,11 +35,11 @@ export const EASE = {
 };
 
 /** A value that swings 0 → 1 → 0 forever. */
-export function useLoop(duration: number, delay = 0) {
-  const v = useRef(new Animated.Value(0)).current;
+export function useLoop(duration: number, delay = 0, enabled = true) {
+  const v = useRef(new Animated.Value(enabled ? 0 : 0.5)).current;
   const reduced = useReducedMotion();
   useEffect(() => {
-    if (reduced !== false) return;
+    if (reduced !== false || !enabled) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.delay(delay),
@@ -49,7 +49,7 @@ export function useLoop(duration: number, delay = 0) {
     );
     loop.start();
     return () => loop.stop();
-  }, [v, duration, delay, reduced]);
+  }, [v, duration, delay, reduced, enabled]);
   return v;
 }
 

@@ -12,6 +12,8 @@ interface Props {
   pending: boolean;
   onPress: () => void;
   onLayout?: (e: LayoutChangeEvent) => void;
+  /** Keep the glow and ripple moving. Off in the tree, where many cards would slow the phone down. */
+  animate?: boolean;
 }
 
 /**
@@ -21,9 +23,9 @@ interface Props {
  * - a link awaiting approval breathes with an amber dashed edge (animation 07)
  * - rings spread out from your own card when the tree opens (animation 05)
  */
-export function PersonCard({ person, label, isMe, pending, onPress, onLayout }: Props) {
+export function PersonCard({ person, label, isMe, pending, onPress, onLayout, animate = false }: Props) {
   const passed = person.is_living === 0;
-  const glow = useLoop(isMe ? 3200 : passed ? 4500 : 2600);
+  const glow = useLoop(isMe ? 3200 : passed ? 4500 : 2600, 0, animate);
   const animated = isMe || passed || pending;
 
   const haloOpacity = glow.interpolate({ inputRange: [0, 1], outputRange: isMe ? [0.25, 0.75] : [0.05, 0.35] });
@@ -35,7 +37,7 @@ export function PersonCard({ person, label, isMe, pending, onPress, onLayout }: 
 
   return (
     <Pressable onPress={onPress} onLayout={onLayout} accessibilityRole="button" accessibilityLabel={a11y} style={{ margin: 6 }}>
-      {isMe && <Ripple />}
+      {isMe && animate && <Ripple />}
       <Animated.View style={{ transform: [{ scale }] }}>
         {animated && (
           <Animated.View

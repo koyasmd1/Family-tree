@@ -547,13 +547,70 @@ export async function pendingForMe(ctx: Ctx, actorId: string) {
 // ---------- the graph ----------
 
 /** Breadth-first distances over active links. */
+// Each query is a trip over the network to the database, so these helpers ask about
+// many people at once instead of one person at a time.
+const CHUNK = 40; // D1 allows 100 values per query
+
+async function relationsOfMany(ctx: Ctx, ids: string[], statuses: RelationStatus[]): Promise<Relation[]> {
+  const out: Relation[] = [];
+  const seen = new Set<string>();
+  const st = statuses.map(() => "?").join(", ");
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const part = ids.slice(i, i + CHUNK);
+    const marks = part.map(() => "?").join(", ");
+    const { results } = await ctx.db
+      .prepare(`SELECT * FROM relations WHERE (a_id IN (${marks}) OR b_id IN (${marks})) AND status IN (${st})`)
+      .bind(...part, ...part, ...statuses)
+      .all<Relation>();
+    for (const r of results) {
+      if (!seen.has(r.id)) {
+        seen.add(r.id);
+        out.push(r);
+      }
+    }
+  }
+  return out;
+}
+
+async function peopleByIds(ctx: Ctx, ids: string[]): Promise<Map<string, Person>> {
+  const out = new Map<string, Person>();
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const part = ids.slice(i, i + CHUNK);
+    const { results } = await ctx.db
+      .prepare(`SELECT * FROM people WHERE id IN (${part.map(() => "?").join(", ")})`)
+      .bind(...part)
+      .all<Person>();
+    for (const p of results) out.set(p.id, p);
+  }
+  return out;
+}
+
+async function membersAmong(ctx: Ctx, ids: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const part = ids.slice(i, i + CHUNK);
+    const { results } = await ctx.db
+      .prepare(`SELECT person_id FROM accounts WHERE person_id IN (${part.map(() => "?").join(", ")})`)
+      .bind(...part)
+      .all<{ person_id: string }>();
+    for (const r of results) out.add(r.person_id);
+  }
+  return out;
+}
+
+/** How many steps each relative is from the starting people, one query per step. */
 async function distancesFrom(ctx: Ctx, starts: string[], maxDepth: number, skipRelationId?: string) {
   const dist = new Map<string, number>(starts.map((s) => [s, 0]));
   let frontier = [...starts];
   for (let depth = 1; depth <= maxDepth && frontier.length; depth++) {
+    const rels = await relationsOfMany(ctx, frontier, ["active"]);
+    const byPerson = new Map<string, Relation[]>();
+    for (const r of rels) {
+      for (const end of [r.a_id, r.b_id]) byPerson.set(end, [...(byPerson.get(end) ?? []), r]);
+    }
     const next: string[] = [];
     for (const id of frontier) {
-      for (const r of await relationsOf(ctx, id, ["active"])) {
+      for (const r of byPerson.get(id) ?? []) {
         if (r.id === skipRelationId) continue;
         const other = r.a_id === id ? r.b_id : r.a_id;
         if (!dist.has(other)) {
@@ -584,11 +641,22 @@ export async function getTree(ctx: Ctx, actorId: string, rootId: string, depth =
   }
 
   const ids = [...fromRoot.keys()];
+  const [persons, members, myLinks, inWindow] = [
+    await peopleByIds(ctx, ids),
+    await membersAmong(ctx, ids),
+    await relationsOf(ctx, actorId, ["active", "pending"]),
+    await relationsOfMany(ctx, ids, ["active", "pending"]),
+  ];
+  const linkedToMe = new Set(myLinks.map((r) => (r.a_id === actorId ? r.b_id : r.a_id)));
+  // Same rule as canManage, worked out from what was loaded above.
+  const canEditPerson = (p: Person) =>
+    p.id === actorId || (!members.has(p.id) && (p.created_by === actorId || linkedToMe.has(p.id)));
+
   const people = [];
   for (const id of ids) {
-    const p = await getPerson(ctx, id);
-    const member = await hasAccount(ctx, id);
-    const canEdit = await canManage(ctx, actorId, id);
+    const p = persons.get(id);
+    if (!p) continue;
+    const canEdit = canEditPerson(p);
     // Privacy: details of living people are shown only to close relatives
     // (and to whoever looks after a profile that has no account).
     const showDetails = p.is_living === 0 || closeToMe.has(id) || canEdit;
@@ -596,7 +664,7 @@ export async function getTree(ctx: Ctx, actorId: string, rootId: string, depth =
       id: p.id,
       full_name: p.full_name,
       is_living: p.is_living,
-      has_account: member,
+      has_account: members.has(id),
       ...(showDetails
         ? {
             gender: p.gender,
@@ -614,17 +682,15 @@ export async function getTree(ctx: Ctx, actorId: string, rootId: string, depth =
   const idSet = new Set(ids);
   const relations: Relation[] = [];
   const seen = new Set<string>();
-  for (const id of ids) {
-    for (const r of await relationsOf(ctx, id, ["active", "pending"])) {
-      if (seen.has(r.id) || !idSet.has(r.a_id) || !idSet.has(r.b_id)) continue;
-      // Pending links are only shown to the two people involved and their creator.
-      if (r.status === "pending" && ![r.a_id, r.b_id, r.created_by].includes(actorId)) continue;
-      seen.add(r.id);
-      relations.push(r);
-    }
+  for (const r of inWindow) {
+    if (seen.has(r.id) || !idSet.has(r.a_id) || !idSet.has(r.b_id)) continue;
+    // Pending links are only shown to the two people involved and their creator.
+    if (r.status === "pending" && ![r.a_id, r.b_id, r.created_by].includes(actorId)) continue;
+    seen.add(r.id);
+    relations.push(r);
   }
   // Pending links to people outside the window (e.g. a sibling just added) for the viewer.
-  for (const r of await relationsOf(ctx, actorId, ["pending"])) {
+  for (const r of myLinks.filter((l) => l.status === "pending")) {
     if (seen.has(r.id)) continue;
     // Only show it next to the person being viewed (or when viewing yourself).
     if (rootId !== actorId && r.a_id !== rootId && r.b_id !== rootId) continue;
