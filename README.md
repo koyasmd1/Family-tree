@@ -49,25 +49,22 @@ If a phone or computer is set to reduce motion, every animation shows a still pi
 
 ## Going live
 
-### Server (free)
-1. Create a free Cloudflare account, then in `api/`: `npx wrangler login`.
-2. `npx wrangler d1 create onefamily` and paste the `database_id` it prints into `api/wrangler.toml`.
-3. `npm run db:migrate:remote`
-4. `npx wrangler secret put SETUP_TOKEN` (any long secret, used once to create the first person).
-5. `npm run deploy`. Wrangler prints the server address, e.g. `https://onefamily-api.<you>.workers.dev`.
-6. Create the first person with the `curl` command above, using the live address.
+Every change merged into `main` is put online automatically by `.github/workflows/deploy.yml`
+(it runs `scripts/deploy.sh`). It creates the database, server and website on Cloudflare's free plan the
+first time, and updates them after that.
 
-### Website (free)
-In `app/`, build with the live addresses, then upload to Cloudflare Pages:
+It needs three GitHub secrets (Settings › Secrets and variables › Actions):
 
-```bash
-EXPO_PUBLIC_API_URL=https://onefamily-api.<you>.workers.dev \
-EXPO_PUBLIC_WEB_URL=https://onefamily.pages.dev \
-npm run build:web
-npx wrangler pages deploy dist --project-name onefamily
-```
+| Secret | What it is |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | A Cloudflare API token with Account permissions: Workers Scripts Edit, D1 Edit, Cloudflare Pages Edit |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID (the long code in the dashboard address) |
+| `SETUP_TOKEN` | Any long secret. You type it once on `/start` to create the first person |
 
-Then set `ALLOWED_ORIGIN` in `api/wrangler.toml` to the website address and deploy the server again.
+The first time, open `<website>/start` and create the first person. After that the page stops working.
+
+To use your own domain, add it to the `onefamily` Pages project in Cloudflare (Custom domains), then add a
+GitHub **variable** `WEB_DOMAIN` (for example `onefamilytree.com`) and run the workflow again.
 
 ### Phone apps
 The same `app/` code builds the iPhone and Android apps with Expo's build service (`npx eas-cli build`).

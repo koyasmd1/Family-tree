@@ -136,6 +136,8 @@ export function api(token: string | null) {
     login: (login: string, password: string) =>
       request<{ personId: string; token: string }>("POST", "/login", null, { login, password }),
     logout: () => request("POST", "/logout", token),
+    setup: (setupToken: string, person: PersonInput, login: string, password: string) =>
+      request<{ person: TreePerson; token: string }>("POST", "/setup", null, { setup_token: setupToken, person, login, password }),
     signUp: (person: PersonInput, login: string, password: string) =>
       request<{ personId: string; token: string }>("POST", "/signup", null, { person, login, password }),
     claim: (personId: string) => request<JoinRequest>("POST", "/claims", token, { person_id: personId }),
